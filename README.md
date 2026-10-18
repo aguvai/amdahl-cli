@@ -57,9 +57,11 @@ job. The skill goes to the client's user skills folder:
 | Codex | `~/.agents/skills/amdahl/SKILL.md` |
 | Cursor | `~/.cursor/skills/amdahl/SKILL.md` |
 
-If that file already exists and you changed it, `install` keeps your copy and
-says so; add `--force` to replace it. `--print` shows what it would run and the
-path it would write, without changing anything. The same map is published at
+If that file is a copy an earlier `amdahl install` wrote, `install` replaces it
+with the current skill. If it differs from every skill the CLI has shipped (you
+changed it), `install` keeps your copy and says so; add `--force` to replace
+it. `--print` shows what it would run and the path it would write, without
+changing anything. The same map is published at
 https://docs.amdahl.ai/skills/amdahl/SKILL.md.
 
 ## Quick start
@@ -155,7 +157,7 @@ pnpm build         # dist/amdahl.js, one file, no runtime deps
 pnpm test          # vitest, against a local mock server
 pnpm type-check
 pnpm smoke:pack    # pack, install offline, run --version
-pnpm sync:skill    # refresh skill/SKILL.md from docs.amdahl.ai, then commit it
+pnpm sync:skill    # refresh skill/SKILL.md from docs.amdahl.ai (and skill/shipped.json), then commit both
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues as described in

@@ -10,7 +10,7 @@ import pkg from '../package.json'
 import { parseCommandLine } from '../src/args'
 import { EXIT, exitForHttp } from '../src/errors'
 import { generateKey } from '../src/keygen'
-import { SKILL_TEXT } from '../src/skill'
+import { SKILL_TEXT, isShippedSkill } from '../src/skill'
 import { VERSION } from '../src/version'
 import { cli, fakeIo } from './helpers/fake-io'
 import { startMockServer, type MockServer } from './helpers/mock-server'
@@ -308,11 +308,30 @@ describe('install', () => {
     const kept = await cli(io, 'install', 'claude-code', '--json')
     expect(kept.code).toBe(0)
     expect(kept.json.skill).toEqual({ action: 'kept', path })
-    expect(kept.stderr).toBe(`Kept your changed ${path}; run again with --force to replace it with the current Amdahl skill.\n`)
+    expect(kept.stderr).toBe(
+      `Kept ${path}: it differs from every Amdahl skill this CLI has shipped, so it may have your edits. Run again with --force to replace it with the current Amdahl skill.\n`
+    )
     expect(readFileSync(path, 'utf8')).toBe('my notes\n')
     const forced = await cli(io, 'install', 'claude-code', '--force', '--json')
     expect(forced.json.skill).toEqual({ action: 'replaced', path })
     expect(readFileSync(path, 'utf8')).toBe(SKILL_TEXT)
+  })
+
+  it('upgrades a skill an earlier release installed, without --force', async () => {
+    const io = fakeIo()
+    io.run.mockImplementation(async () => ({ code: 0, stdout: '', stderr: '' }))
+    const path = join(io.homedir, '.claude', 'skills', 'amdahl', 'SKILL.md')
+    mkdirSync(join(io.homedir, '.claude', 'skills', 'amdahl'), { recursive: true })
+    writeFileSync(path, readFileSync(join(__dirname, 'fixtures', 'skill-0.1.3.md'), 'utf8'))
+    const r = await cli(io, 'install', 'claude-code', '--json')
+    expect(r.json.skill).toEqual({ action: 'replaced', path })
+    expect(r.stderr).toBe('')
+    expect(readFileSync(path, 'utf8')).toBe(SKILL_TEXT)
+  })
+
+  it('knows every skill an earlier release shipped, and not the bundled one', () => {
+    expect(isShippedSkill(readFileSync(join(__dirname, 'fixtures', 'skill-0.1.3.md'), 'utf8'))).toBe(true)
+    expect(isShippedSkill(SKILL_TEXT)).toBe(false)
   })
 
   it('claude-code --print shows the skill path and writes nothing', async () => {
