@@ -22,6 +22,10 @@ In Claude (web or desktop):
    Amdahl is not listed, reload the app (Cmd+R, or Ctrl+R on Windows).
 6. Optional: in Amdahl's connector settings, set its tool access to
    **Always available**, so Claude does not have to search for its tools.
+   Under **Tool permissions**, you can also set **Read-only tools** to
+   **Always allow**. Writing a message is a write call, so Claude asks before
+   each one unless you also allow the message tool, `optimize_message`
+   (**Custom**, or **Write/delete tools** set to **Always allow**).
 7. Name the server in your ask: "Use the Amdahl MCP server to optimize this
    draft: ...". Claude does not call Amdahl for a plain "make this better".
 
