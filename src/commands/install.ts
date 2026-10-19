@@ -4,13 +4,14 @@
 // client at `<api>/mcp` and put the Amdahl skill (the capability map) in the
 // client's user skills folder. NEVER writes a token: every client signs in over
 // OAuth on first use. `--print` only prints what it would run or write. An
-// existing skill file that differs is kept unless `--force`.
+// existing skill file that an earlier release wrote is upgraded; one the user
+// edited is kept unless `--force`.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Ctx } from '../context'
 import { CliError, EXIT, usageError } from '../errors'
-import { SKILL_TEXT, SKILL_URL, skillPath } from '../skill'
+import { SKILL_TEXT, SKILL_URL, isShippedSkill, skillPath } from '../skill'
 
 const CLIENTS = ['claude-code', 'codex', 'cursor'] as const
 type Client = (typeof CLIENTS)[number]
@@ -55,9 +56,10 @@ export async function install(ctx: Ctx, args: string[]): Promise<number> {
 }
 
 /**
- * Write the bundled skill to the client's user skills folder. Never replaces a
- * file that differs from the bundled one without `--force`, and never fails
- * the install: a write error becomes a note with the map's URL.
+ * Write the bundled skill to the client's user skills folder. Replaces a copy
+ * an earlier release wrote, but never a file the user edited without
+ * `--force`, and never fails the install: a write error becomes a note with
+ * the map's URL.
  */
 function installSkill(ctx: Ctx, client: Client, print: boolean): Step {
   const path = skillPath(client, ctx.io.homedir)
@@ -68,11 +70,11 @@ function installSkill(ctx: Ctx, client: Client, print: boolean): Step {
   if (current === SKILL_TEXT) {
     return { data: { action: 'unchanged', path }, human: `The Amdahl skill at ${path} is up to date.`, notes: [] }
   }
-  if (current !== null && ctx.flags.force !== true) {
+  if (current !== null && !isShippedSkill(current) && ctx.flags.force !== true) {
     return {
       data: { action: 'kept', path },
       human: '',
-      notes: [`Kept your changed ${path}; run again with --force to replace it with the current Amdahl skill.`],
+      notes: [`Kept ${path}: it differs from every Amdahl skill this CLI has shipped, so it may have your edits. Run again with --force to replace it with the current Amdahl skill.`],
     }
   }
   try {

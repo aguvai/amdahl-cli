@@ -22,6 +22,10 @@ In Claude (web or desktop):
    Amdahl is not listed, reload the app (Cmd+R, or Ctrl+R on Windows).
 6. Optional: in Amdahl's connector settings, set its tool access to
    **Always available**, so Claude does not have to search for its tools.
+   Under **Tool permissions**, you can also set **Read-only tools** to
+   **Always allow**. Writing a message is a write call, so Claude asks before
+   each one unless you also allow the message tool, `optimize_message`
+   (**Custom**, or **Write/delete tools** set to **Always allow**).
 7. Name the server in your ask: "Use the Amdahl MCP server to optimize this
    draft: ...". Claude does not call Amdahl for a plain "make this better".
 
@@ -57,9 +61,11 @@ job. The skill goes to the client's user skills folder:
 | Codex | `~/.agents/skills/amdahl/SKILL.md` |
 | Cursor | `~/.cursor/skills/amdahl/SKILL.md` |
 
-If that file already exists and you changed it, `install` keeps your copy and
-says so; add `--force` to replace it. `--print` shows what it would run and the
-path it would write, without changing anything. The same map is published at
+If that file is a copy an earlier `amdahl install` wrote, `install` replaces it
+with the current skill. If it differs from every skill the CLI has shipped (you
+changed it), `install` keeps your copy and says so; add `--force` to replace
+it. `--print` shows what it would run and the path it would write, without
+changing anything. The same map is published at
 https://docs.amdahl.ai/skills/amdahl/SKILL.md.
 
 ## Quick start
@@ -155,7 +161,7 @@ pnpm build         # dist/amdahl.js, one file, no runtime deps
 pnpm test          # vitest, against a local mock server
 pnpm type-check
 pnpm smoke:pack    # pack, install offline, run --version
-pnpm sync:skill    # refresh skill/SKILL.md from docs.amdahl.ai, then commit it
+pnpm sync:skill    # refresh skill/SKILL.md from docs.amdahl.ai (and skill/shipped.json), then commit both
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues as described in
