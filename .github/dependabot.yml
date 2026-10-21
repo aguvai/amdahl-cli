@@ -6,10 +6,16 @@ updates:
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 10
+      time: "06:00"
+      timezone: America/Los_Angeles
+    open-pull-requests-limit: 3
     groups:
-      # Group minor and patch updates to reduce PR noise. Majors come one by one.
-      minor-and-patch:
+      # One weekly PR for all minor and patch updates (AMD-1156). Majors come
+      # one by one. Version updates only; security updates stay individual.
+      all-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
         update-types:
           - minor
           - patch
@@ -19,9 +25,14 @@ updates:
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 5
+      time: "06:00"
+      timezone: America/Los_Angeles
+    open-pull-requests-limit: 3
     groups:
-      actions:
+      all-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
         update-types:
           - minor
           - patch
