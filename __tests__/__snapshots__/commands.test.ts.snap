@@ -8,6 +8,8 @@ What you can do:
   amdahl status                  Check that this workspace is set up to optimize
   amdahl keys create --name ci   Make an API key for a server or CI
   amdahl install claude-code     Connect your AI client (also codex, cursor)
+  amdahl skills add <publisher>/<skill>
+                                 Add a skill from https://amdahl.ai/skills to this project
   For everything Amdahl can do: https://docs.amdahl.ai/skills/amdahl/SKILL.md
 
 Commands:
@@ -23,6 +25,7 @@ Commands:
   keys revoke <id|prefix> [--yes] [--no-browser]
   workspace list | workspace use <profile>
   install claude-code|codex|cursor [--print] [--force]
+  skills add <publisher>/<skill> [-g] [--agents] [--force] [--site <origin>]
 
 Global options:
   --profile <name>   Use a saved profile (default: AMDAHL_PROFILE, then the default profile)

@@ -9,6 +9,7 @@ import { authToken, login, logout, whoami } from './commands/auth'
 import { install } from './commands/install'
 import { keysCreate, keysList, keysRevoke } from './commands/keys'
 import { optimize } from './commands/optimize'
+import { skillsAdd } from './commands/skills'
 import { status, workspaceList, workspaceUse } from './commands/workspace-status'
 import { createCtx, toCliError, type Ctx } from './context'
 import { CliError, EXIT } from './errors'
@@ -31,6 +32,7 @@ const COMMANDS: Record<string, Handler> = {
   'workspace list': (ctx) => workspaceList(ctx),
   'workspace use': workspaceUse,
   install,
+  'skills add': skillsAdd,
 }
 
 /** Commands that take no positional arguments. */

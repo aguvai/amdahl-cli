@@ -42,12 +42,16 @@ export interface Io {
   /** Open a URL in the default browser. Never throws. */
   openUrl: (url: string) => Promise<void>
   homedir: string
+  /** The working directory: where a project's skills go. */
+  cwd: string
   platform: NodeJS.Platform
   hostname: string
   now: () => number
   sleep: (ms: number) => Promise<void>
   /** How long `login` waits for the browser callback. */
   loginTimeoutMs: number
+  /** How long `skills add` waits for each request, body included. */
+  fetchTimeoutMs: number
 }
 
 /** Spawn a process and collect its output. Never rejects. */
@@ -112,10 +116,12 @@ export function realIo(): Io {
       await runProcess(cmd, args)
     },
     homedir: homedir(),
+    cwd: process.cwd(),
     platform: process.platform,
     hostname: hostname(),
     now: () => Date.now(),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     loginTimeoutMs: 300_000,
+    fetchTimeoutMs: 15_000,
   }
 }

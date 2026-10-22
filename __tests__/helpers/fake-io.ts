@@ -1,8 +1,8 @@
-// A fake process boundary: captured output, a temp config home, a spy on
-// spawned processes, and a "browser" that follows the authorize redirect to
+// A fake process boundary: captured output, a temp config home (with a
+// `project` folder as the working directory), a spy on spawned processes, and a "browser" that follows the authorize redirect to
 // the CLI's loopback listener the way a signed-in browser would.
 
-import { mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { vi } from 'vitest'
@@ -28,6 +28,8 @@ export async function followAuthorize(url: string): Promise<void> {
 
 export function fakeIo(env: Record<string, string | undefined> = {}, home?: string): FakeIo {
   const dir = home ?? mkdtempSync(join(tmpdir(), 'amdahl-cli-test-'))
+  const cwd = join(dir, 'project')
+  mkdirSync(cwd, { recursive: true })
   const io: FakeIo = {
     out: [],
     err: [],
@@ -47,11 +49,13 @@ export function fakeIo(env: Record<string, string | undefined> = {}, home?: stri
       await followAuthorize(url)
     },
     homedir: dir,
+    cwd,
     platform: 'linux',
     hostname: 'test-host',
     now: () => Date.now(),
     sleep: async () => {},
     loginTimeoutMs: 3000,
+    fetchTimeoutMs: 100,
   }
   return io
 }

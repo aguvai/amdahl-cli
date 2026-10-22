@@ -50,6 +50,12 @@ const COMMAND_OPTIONS: Record<string, OptionSpec> = {
   'workspace list': {},
   'workspace use': {},
   install: { print: { type: 'boolean' }, force: { type: 'boolean' } },
+  'skills add': {
+    global: { type: 'boolean', short: 'g' },
+    agents: { type: 'boolean' },
+    force: { type: 'boolean' },
+    site: { type: 'string' },
+  },
 }
 
 /** Aliases onto canonical command names. */
@@ -60,7 +66,7 @@ const ALIASES: Record<string, string> = {
 }
 
 /** Every command that takes one or two words. */
-const TWO_WORD = new Set(['auth', 'keys', 'workspace'])
+const TWO_WORD = new Set(['auth', 'keys', 'workspace', 'skills'])
 
 /** The parsed command line. */
 export interface ParsedArgs {
@@ -132,6 +138,8 @@ What you can do:
   amdahl status                  Check that this workspace is set up to optimize
   amdahl keys create --name ci   Make an API key for a server or CI
   amdahl install claude-code     Connect your AI client (also codex, cursor)
+  amdahl skills add <publisher>/<skill>
+                                 Add a skill from https://amdahl.ai/skills to this project
   For everything Amdahl can do: https://docs.amdahl.ai/skills/amdahl/SKILL.md
 
 Commands:
@@ -147,6 +155,7 @@ Commands:
   keys revoke <id|prefix> [--yes] [--no-browser]
   workspace list | workspace use <profile>
   install claude-code|codex|cursor [--print] [--force]
+  skills add <publisher>/<skill> [-g] [--agents] [--force] [--site <origin>]
 
 Global options:
   --profile <name>   Use a saved profile (default: AMDAHL_PROFILE, then the default profile)

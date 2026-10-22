@@ -2,7 +2,8 @@
 
 The `amdahl` command line. It signs you in with your console account, checks
 that a workspace can optimize, rewrites messages, manages API keys (each one
-approved in the console), and points MCP clients at Amdahl.
+approved in the console), points MCP clients at Amdahl, and installs skills
+from the library at https://amdahl.ai/skills.
 
 ## Using the Claude or ChatGPT app? You do not need this CLI
 
@@ -76,6 +77,7 @@ amdahl whoami                # the account, workspace and role you are signed in
 amdahl status                # can this workspace optimize, and what blocks it
 amdahl optimize draft.md     # rewrite one message (or pipe it in with -)
 amdahl install claude-code   # connect an AI client and add the Amdahl skill (also codex, cursor)
+amdahl skills add <publisher>/<skill>   # add a skill from amdahl.ai/skills to this project
 ```
 
 No workspace yet? `amdahl login` prints the console link where you can
@@ -98,10 +100,54 @@ amdahl keys list
 amdahl keys revoke <id|prefix> [--yes] [--no-browser]
 amdahl workspace list | amdahl workspace use <profile>
 amdahl install claude-code|codex|cursor [--print] [--force]
+amdahl skills add <publisher>/<skill> [-g] [--agents] [--force] [--site <origin>]
 ```
 
 Global flags: `--profile`, `--api-url`, `--api-key`, `--json`, `--no-color`,
 `-h`, `-v`. With `--json`, data goes to stdout and messages to stderr.
+
+## Skills
+
+`skills add` installs one skill from the library at https://amdahl.ai/skills.
+It needs no sign-in.
+
+```sh
+npx @amdahl/cli skills add <publisher>/<skill>
+# the skill's link works too, with or without .md:
+npx @amdahl/cli skills add https://amdahl.ai/skills/<publisher>/<skill>
+```
+
+It reads the skill's index,
+`https://amdahl.ai/skills/<publisher>/<skill>/.well-known/agent-skills/index.json`
+([Agent Skills Discovery](https://schemas.agentskills.io/discovery/0.2.0/schema.json)
+v0.2.0), then downloads the SKILL.md that the index names. It refuses the file,
+and writes nothing, unless all of these are true:
+
+- The sha256 of the downloaded bytes equals the index's `digest`.
+- The front matter parses as YAML, `name` is a string, and `description` is
+  a string that is not empty.
+- `name` equals the skill's name in the index.
+- The index points at a file on the same site.
+
+It writes the file exactly as downloaded, and prints each path it wrote:
+
+| flag | file |
+|---|---|
+| (none) | `./.claude/skills/<name>/SKILL.md`, for Claude Code in this project |
+| `-g`, `--global` | `~/.claude/skills/<name>/SKILL.md`, for every project |
+| `--agents` | also `.agents/skills/<name>/SKILL.md` (in this project, or in `~` with `-g`), which Codex, Cursor and most other agents read |
+
+If a different file with that name is already there, `skills add` stops
+before it writes anything; add `--force` to replace it. A file that is
+already identical is left as it is.
+
+It sends two requests, both to amdahl.ai: the index, then the file. It
+follows no redirect and sends no telemetry. It waits at most 15 seconds for
+each request. It refuses an index over 256 KB and a SKILL.md over 64 KB (the
+most amdahl.ai accepts). Either refusal writes nothing. `--site <origin>` sends both
+requests to another origin, for example a local copy of the site
+(`--site http://localhost:6782`). The origin must be `https`; `http` is
+allowed only for localhost.
 
 ## Targeting staging
 
@@ -141,7 +187,7 @@ code shown in the terminal; then the key is printed once and stored nowhere.
 | code | meaning |
 |---|---|
 | 0 | ok |
-| 1 | general (`login_timeout`, `state_mismatch`, optimize `ok: false`) |
+| 1 | general (`login_timeout`, `state_mismatch`, optimize `ok: false`, a `skills add` refusal) |
 | 2 | usage |
 | 3 | not signed in (401, `invalid_grant`, no credential) |
 | 4 | forbidden (403, `oauth_required`, `cli_client_required`, `not_admin`) |
