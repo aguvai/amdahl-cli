@@ -277,13 +277,13 @@ describe('install', () => {
       ok: true,
       client: 'claude-code',
       action: 'printed',
-      command: 'claude mcp add --transport http amdahl https://app.amdahl.ai/mcp',
+      command: 'claude mcp add --scope user --transport http amdahl https://app.amdahl.ai/mcp',
       skill: { action: 'wrote', path: join(io.homedir, '.claude', 'skills', 'amdahl', 'SKILL.md') },
     })
     io.run.mockImplementation(async () => ({ code: 0, stdout: '', stderr: '' }))
     const ran = await cli(io, 'install', 'claude-code', '--json')
     expect(ran.json.action).toBe('ran')
-    expect(io.run).toHaveBeenLastCalledWith('claude', ['mcp', 'add', '--transport', 'http', 'amdahl', 'https://app.amdahl.ai/mcp'])
+    expect(io.run).toHaveBeenLastCalledWith('claude', ['mcp', 'add', '--scope', 'user', '--transport', 'http', 'amdahl', 'https://app.amdahl.ai/mcp'])
   })
 
   it('claude-code installs the bundled skill next to the MCP server', async () => {
@@ -293,7 +293,7 @@ describe('install', () => {
     const r = await cli(io, 'install', 'claude-code')
     expect(r.code).toBe(0)
     expect(r.stdout).toBe(
-      `Added Amdahl to Claude Code. Run /mcp in Claude Code to sign in.\nAdded the Amdahl skill (what Amdahl can do) at ${path}.\n`
+      `Added Amdahl to Claude Code for all your projects. Run /mcp in Claude Code to sign in. If amdahl is not listed there, restart Claude Code first.\nAdded the Amdahl skill (what Amdahl can do) at ${path}.\n`
     )
     expect(readFileSync(path, 'utf8')).toBe(SKILL_TEXT)
     expect((await cli(io, 'install', 'claude-code', '--json')).json.skill).toEqual({ action: 'unchanged', path })
@@ -338,7 +338,7 @@ describe('install', () => {
     const io = fakeIo()
     const path = join(io.homedir, '.claude', 'skills', 'amdahl', 'SKILL.md')
     const r = await cli(io, 'install', 'claude-code', '--print')
-    expect(r.stdout).toBe(`claude mcp add --transport http amdahl https://app.amdahl.ai/mcp\n# Amdahl skill: ${path}\n`)
+    expect(r.stdout).toBe(`claude mcp add --scope user --transport http amdahl https://app.amdahl.ai/mcp\n# Amdahl skill: ${path}\n`)
     expect(existsSync(join(io.homedir, '.claude'))).toBe(false)
     expect(io.run).not.toHaveBeenCalled()
   })

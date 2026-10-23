@@ -95,7 +95,9 @@ async function installMcp(ctx: Ctx, client: Client, print: boolean): Promise<Ste
   const { io } = ctx
 
   if (client === 'claude-code') {
-    const args = ['mcp', 'add', '--transport', 'http', 'amdahl', mcpUrl]
+    // User scope: Amdahl works in every project, not only the folder the
+    // command ran from (the default local scope ties it to that one folder).
+    const args = ['mcp', 'add', '--scope', 'user', '--transport', 'http', 'amdahl', mcpUrl]
     const command = `claude ${args.join(' ')}`
     if (print || !(await onPath(ctx, 'claude'))) {
       const notes = print ? [] : ['`claude` is not on your PATH. Run the command above once it is installed.']
@@ -105,7 +107,7 @@ async function installMcp(ctx: Ctx, client: Client, print: boolean): Promise<Ste
     if (res.code !== 0) {
       throw new CliError('install_failed', `\`${command}\` failed: ${res.stderr.trim() || `exit ${res.code}`}`, EXIT.general)
     }
-    return { data: { ok: true, client, action: 'ran', command }, human: `Added Amdahl to Claude Code. Run /mcp in Claude Code to sign in.`, notes: [] }
+    return { data: { ok: true, client, action: 'ran', command }, human: `Added Amdahl to Claude Code for all your projects. Run /mcp in Claude Code to sign in. If amdahl is not listed there, restart Claude Code first.`, notes: [] }
   }
 
   if (client === 'codex') {
