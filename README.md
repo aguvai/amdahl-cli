@@ -40,7 +40,8 @@ Full steps: https://amdahl.ai/connect
 
 ## Install
 
-Needs Node.js 20 or later.
+Needs Node.js 20 or later. On an older Node, `amdahl` stops before it does
+anything, names the version it found, and links the Node.js download page.
 
 ```sh
 # Run once, with no install

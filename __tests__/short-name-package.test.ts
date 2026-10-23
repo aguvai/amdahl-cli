@@ -26,11 +26,11 @@ describe('the amdahl package', () => {
 
   it('gives the same `amdahl` command, which only loads the CLI bin', () => {
     expect(short.bin).toEqual({ amdahl: 'amdahl.js' })
-    expect(cli.bin).toEqual({ amdahl: 'dist/amdahl.js' })
+    expect(cli.bin).toEqual({ amdahl: 'bin/amdahl.js' })
     const shim = read('packages/amdahl/amdahl.js')
     expect(shim.startsWith('#!/usr/bin/env node\n')).toBe(true)
     expect(shim.split('\n').filter((l) => l && !l.startsWith('//') && !l.startsWith('#!'))).toEqual([
-      "import '@amdahl/cli/dist/amdahl.js'",
+      "import '@amdahl/cli/bin/amdahl.js'",
     ])
     expect(statSync(join(root, 'packages/amdahl/amdahl.js')).mode & 0o111).not.toBe(0)
   })

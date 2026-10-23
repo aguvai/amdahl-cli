@@ -19,9 +19,10 @@
     "mcp"
   ],
   "bin": {
-    "amdahl": "dist/amdahl.js"
+    "amdahl": "bin/amdahl.js"
   },
   "files": [
+    "bin/amdahl.js",
     "dist/amdahl.js",
     "README.md",
     "LICENSE"
