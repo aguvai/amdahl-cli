@@ -38,8 +38,9 @@ function terminal(answers: (string | null)[] = [], env: Record<string, string> =
 
 const claudeDir = (base: string) => join(base, '.claude', 'skills', 'system-diagram')
 const agentsDir = (base: string) => join(base, '.agents', 'skills', 'system-diagram')
-const WHERE = 'Press Enter for 1, or type 2: '
-const KEEP = 'Press Enter to keep yours, or type y to replace it: '
+/** The where menu, as the fake terminal records it. */
+const WHERE = (io: FakeIo) => `Install it in: [This project (~${io.cwd.slice(io.homedir.length)}) | Every project on this computer]`
+const KEEP = 'Keep or replace it? [Keep your copy | Replace it]'
 const add = (io: FakeIo, ...flags: string[]) => cli(io, 'skills', 'add', 'amdahl/system-diagram', ...flags)
 
 /** Put a different copy of the skill in the project's .claude/skills. */
@@ -56,10 +57,9 @@ describe('skills add, guided', () => {
   it('asks one question, where; Enter installs in this project', async () => {
     const fetchMock = serve()
     const io = terminal([], { CLAUDECODE: '1' })
-    const here = `~${io.cwd.slice(io.homedir.length)}`
     const r = await add(io)
     expect(r.code).toBe(0)
-    expect(io.prompts).toEqual([WHERE])
+    expect(io.prompts).toEqual([WHERE(io)])
     expect(readdirSync(claudeDir(io.cwd)).sort()).toEqual(['SKILL.md', 'build.py', 'engine'])
     expect(existsSync(join(io.cwd, '.agents'))).toBe(false)
     expect(r.stderr).toBe(
@@ -67,9 +67,6 @@ describe('skills add, guided', () => {
         'Checking amdahl/system-diagram on amdahl.ai... OK',
         '',
         'System diagram, by Amdahl (3 files), for Claude Code.',
-        'Install it in:',
-        `  1. This project (${here})`,
-        '  2. Every project on this computer',
         'Open a new Claude Code chat in this folder to use it.',
         '',
       ].join('\n')
@@ -104,7 +101,7 @@ describe('skills add, guided', () => {
     const io = terminal([], env)
     setUp(io)
     const r = await add(io)
-    expect(io.prompts).toEqual([WHERE])
+    expect(io.prompts).toEqual([WHERE(io)])
     expect(r.stderr).toContain(`System diagram, by Amdahl (3 files), for ${line}.\n`)
     expect(existsSync(claudeDir(io.cwd))).toBe(claude)
     expect(existsSync(agentsDir(io.cwd))).toBe(agents)
@@ -124,13 +121,28 @@ describe('skills add, guided', () => {
     expect(r.stderr).toContain('Open a new Claude Code chat in any folder to use it.')
   })
 
-  it('1 is the same as Enter, and an answer it cannot read asks again', async () => {
+  it('picking the first row is the same as Enter', async () => {
     serve()
-    const io = terminal(['three', '1'], { CLAUDECODE: '1' })
+    const io = terminal(['1'], { CLAUDECODE: '1' })
     expect((await add(io)).code).toBe(0)
-    expect(io.prompts).toEqual([WHERE, WHERE])
-    expect(io.err.join('')).toContain('Press Enter for 1, or type 2.\n')
     expect(existsSync(claudeDir(io.cwd))).toBe(true)
+    expect(existsSync(claudeDir(io.homedir))).toBe(false)
+  })
+
+  it('asks in colour when colour is allowed, and in bold when it is not', async () => {
+    serve()
+    const plain = terminal([], { CLAUDECODE: '1' })
+    await add(plain)
+    const colored = terminal([], { CLAUDECODE: '1' })
+    colored.stderrIsTTY = true
+    await add(colored)
+    const noColor = terminal([], { CLAUDECODE: '1', NO_COLOR: '1' })
+    noColor.stderrIsTTY = true
+    await add(noColor)
+    const dumb = terminal([], { CLAUDECODE: '1', TERM: 'dumb' })
+    dumb.stderrIsTTY = true
+    await add(dumb)
+    expect([plain.selectColor, colored.selectColor, noColor.selectColor, dumb.selectColor]).toEqual([[false], [true], [false], [false]])
   })
 
   it('asks nothing in the home folder, and installs for every project', async () => {
@@ -157,7 +169,6 @@ describe('skills add, guided', () => {
 
   it.each<[string, (string | null)[], boolean]>([
     ['the where question', [null], false],
-    ['a "no" at the where question', ['n'], false],
     ['the replace question', ['', null], true],
   ])('Ctrl+C at %s stops with nothing written', async (_label, answers, existing) => {
     serve()
@@ -171,13 +182,13 @@ describe('skills add, guided', () => {
     else expect(readdirSync(io.cwd)).toEqual([])
   })
 
-  it('a different copy: Enter keeps it, y replaces it', async () => {
+  it('a different copy: the menu starts on Keep your copy; Replace it replaces it', async () => {
     serve()
     const io = terminal(['', ''], { CLAUDECODE: '1' })
     ownCopy(io)
     const kept = await add(io)
     expect(kept.code).toBe(0)
-    expect(io.prompts).toEqual([WHERE, KEEP])
+    expect(io.prompts).toEqual([WHERE(io), KEEP])
     expect(kept.stderr).toContain(
       'A different copy of system-diagram is already at ./.claude/skills/system-diagram.\nReplacing it deletes that copy, with any changes you made to it.\n'
     )
@@ -185,10 +196,10 @@ describe('skills add, guided', () => {
     expect(readFileSync(join(claudeDir(io.cwd), 'SKILL.md'), 'utf8')).toBe('mine\n')
 
     io.prompts.length = 0
-    io.answers.push('', 'y')
+    io.answers.push('', '2')
     const replaced = await add(io)
     expect(replaced.code).toBe(0)
-    expect(io.prompts).toEqual([WHERE, KEEP])
+    expect(io.prompts).toEqual([WHERE(io), KEEP])
     expect(replaced.stdout).toBe('\nDone. Added to ./.claude/skills.\n')
     expect(readFileSync(join(claudeDir(io.cwd), 'SKILL.md'), 'utf8')).toBe(SKILL)
   })
@@ -199,7 +210,7 @@ describe('skills add, guided', () => {
     ownCopy(io)
     const r = await add(io, '--force')
     expect(r.code).toBe(0)
-    expect(io.prompts).toEqual([WHERE])
+    expect(io.prompts).toEqual([WHERE(io)])
     expect(readFileSync(join(claudeDir(io.cwd), 'SKILL.md'), 'utf8')).toBe(SKILL)
   })
 

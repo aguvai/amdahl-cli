@@ -5,14 +5,15 @@
 // terminal and no flag already says where the skill goes (-g, --agents, -y);
 // an agent, CI or a pipe never gets a question.
 //
-// One question. It names the skill and the agents it sees in use, then asks
-// where: this project (Enter) or every project on this computer. The answer
+// One question, an arrow-key menu (src/select.ts). It names the skill and the
+// agents it sees in use, then asks where: this project (the marker starts
+// there) or every project on this computer. The answer
 // is the go-ahead; there is no second confirm. It is not asked in the home
 // folder, where the two are the same. The agents are never asked: they come
 // from what is in use (both folders when it sees both kinds, or neither), and
-// -g / --agents change them. When a different copy is already there, Enter
-// keeps it and `y` replaces it; --force replaces it without asking. Ctrl+C
-// stops with nothing written.
+// -g / --agents change them. When a different copy is already there, a
+// second menu starts on "Keep your copy", then "Replace it"; --force
+// replaces it without asking. Ctrl+C stops with nothing written.
 
 import { existsSync } from 'node:fs'
 import { dirname, join, relative, sep } from 'node:path'
@@ -99,17 +100,6 @@ function readable(slug: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
-/** Ask until the answer is one of `allowed` ('' is Enter). `n` or `no` stops, as Ctrl+C does. */
-async function key(ctx: Ctx, question: string, allowed: string[], retry: string): Promise<string> {
-  for (;;) {
-    const answer = (await ctx.io.prompt(question)).trim().toLowerCase()
-    if (answer === 'n' || answer === 'no') throw new PromptCancelled()
-    if (allowed.includes(answer)) return answer
-    if (answer === 'yes' && allowed.includes('y')) return 'y'
-    ctx.out.info(retry)
-  }
-}
-
 /**
  * Ask where the skill goes, then return the plan to write. Writes nothing.
  * Ctrl+C at the question throws a `cancelled` CliError.
@@ -125,6 +115,7 @@ export async function guide(ctx: Ctx, skill: SkillSummary, payload: Payload): Pr
 
 async function ask(ctx: Ctx, skill: SkillSummary, payload: Payload): Promise<GuideResult> {
   const { io, out } = ctx
+  const color = out.color
   const used = agentsInUse(ctx)
   const count = payload.type === 'archive' ? payload.archive.files.length : 1
   const version = skill.version ? `${skill.version.startsWith('v') ? '' : 'v'}${skill.version}, ` : ''
@@ -133,9 +124,8 @@ async function ask(ctx: Ctx, skill: SkillSummary, payload: Payload): Promise<Gui
   let base = io.homedir
   if (io.cwd !== io.homedir) {
     const here = io.cwd.startsWith(io.homedir + sep) ? `~${io.cwd.slice(io.homedir.length).split(sep).join('/')}` : io.cwd
-    out.info(['Install it in:', `  1. This project (${here})`, '  2. Every project on this computer'].join('\n'))
-    const answer = await key(ctx, 'Press Enter for 1, or type 2: ', ['', '1', '2'], 'Press Enter for 1, or type 2.')
-    base = answer === '2' ? io.homedir : io.cwd
+    const pick = await io.select('Install it in:', [`This project (${here})`, 'Every project on this computer'], { initial: 0, color })
+    base = pick === 1 ? io.homedir : io.cwd
   }
 
   const targets: Targets = { base, claude: used.claude, agents: used.agents }
@@ -150,8 +140,8 @@ async function ask(ctx: Ctx, skill: SkillSummary, payload: Payload): Promise<Gui
       'Replacing it deletes that copy, with any changes you made to it.',
     ].join('\n')
   )
-  const answer = await key(ctx, 'Press Enter to keep yours, or type y to replace it: ', ['', 'y'], 'Press Enter to keep yours, or type y.')
-  return answer === 'y' ? { kind: 'install', targets, plan, force: true } : { kind: 'kept', targets, plan }
+  const pick = await io.select('Keep or replace it?', ['Keep your copy', 'Replace it'], { initial: 0, color })
+  return pick === 1 ? { kind: 'install', targets, plan, force: true } : { kind: 'kept', targets, plan }
 }
 
 /** The folders a plan touches, as the person would type them: `./.claude/skills`, not the skill folder. */

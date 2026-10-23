@@ -7,6 +7,7 @@
 import { spawn } from 'node:child_process'
 import { homedir, hostname } from 'node:os'
 import { createInterface } from 'node:readline'
+import { selectMenu } from './select'
 
 /** Result of running a child process to completion. */
 export interface ProcessResult {
@@ -48,6 +49,12 @@ export interface Io {
   readStdin: () => Promise<string>
   /** Ask one question on the terminal and return the answer line. Rejects with PromptCancelled on Ctrl+C or Ctrl+D. */
   prompt: (question: string) => Promise<string>
+  /**
+   * Show an arrow-key menu on the terminal and return the picked row. Rejects
+   * with PromptCancelled on Ctrl+C or Ctrl+D. `color` marks the row in the
+   * brand colour; without it, bold.
+   */
+  select: (question: string, choices: string[], options?: { initial?: number; color?: boolean }) => Promise<number>
   /** Run synchronous file writes that Ctrl+C must not cut off half way. */
   uninterruptible: <T>(fn: () => T) => T
   run: RunProcess
@@ -150,6 +157,11 @@ export function realIo(): Io {
     stderrIsTTY: Boolean(process.stderr.isTTY),
     readStdin: readAllStdin,
     prompt: promptLine,
+    select: (question, choices, options) =>
+      selectMenu(process.stdin, process.stderr, question, choices, {
+        ...options,
+        trueColor: /^(truecolor|24bit)$/i.test(process.env.COLORTERM ?? ''),
+      }),
     uninterruptible,
     run: runProcess,
     openUrl: async (url) => {

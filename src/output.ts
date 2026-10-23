@@ -11,6 +11,8 @@ import type { Io } from './io'
 export interface Output {
   /** True under `--json`. */
   json: boolean
+  /** True when colour is allowed: stderr is a terminal, not `--json`, `--no-color`, NO_COLOR or TERM=dumb. */
+  color: boolean
   /** Print the command's result: JSON on stdout, or the human lines. */
   result: (data: Record<string, unknown> | Record<string, unknown>[], human?: string) => void
   /** Print a message to stderr (never stdout). */
@@ -29,9 +31,10 @@ export interface Output {
  * @param noColor - whether `--no-color` was passed.
  */
 export function createOutput(io: Io, json: boolean, noColor: boolean): Output {
-  const color = !noColor && !io.env.NO_COLOR && io.stderrIsTTY && !json
+  const color = !noColor && !io.env.NO_COLOR && io.env.TERM !== 'dumb' && io.stderrIsTTY && !json
   return {
     json,
+    color,
     result(data, human) {
       if (json) {
         io.stdout(`${JSON.stringify(data)}\n`)

@@ -124,17 +124,22 @@ npx amdahl skills add https://amdahl.ai/skills/<publisher>/<skill>
 
 In a terminal, it asks one question. It prints `Checking <publisher>/<skill>
 on amdahl.ai... OK` while it downloads and checks the skill. Then it names
-the skill and the agents it sees in use, and asks where to install it:
+the skill and the agents it sees in use, and asks where to install it, in a
+menu:
 
 ```
 System diagram, by Amdahl (17 files), for Claude Code and Cursor.
 Install it in:
-  1. This project (~/proj)
-  2. Every project on this computer
-Press Enter for 1, or type 2:
+> This project (~/proj)
+  Every project on this computer
+(Use the arrow keys, then Enter)
 ```
 
-The answer is the go-ahead: it installs, prints the folders it wrote, and
+Up and Down (or `k` and `j`) move the marker; typing `1` or `2` jumps to
+that row. Enter picks, and the menu shrinks to one line, such as
+`Install it in: This project (~/proj)`. The marked row is in the brand
+colour, or bold when colour is off (`--no-color`, `NO_COLOR`, `TERM=dumb`).
+The pick is the go-ahead: it installs, prints the folders it wrote, and
 says to open a new chat. In your home folder it does not ask, and installs
 for every project. Ctrl+C stops it with nothing written (exit 130).
 
@@ -145,8 +150,9 @@ means Codex, a `.cursor` folder or `CURSOR_AGENT` means Cursor, and an
 both kinds, or neither, it writes both folders. To choose yourself, use the
 flags below.
 
-If a different copy of the skill is already there, it asks once more: Enter
-keeps yours, `y` replaces it. With `--force` it replaces it without asking.
+If a different copy of the skill is already there, it asks once more, in
+the same kind of menu: "Keep your copy" (where the marker starts) or
+"Replace it". With `--force` it replaces it without asking.
 
 It never asks when stdin or stdout is not a terminal (an agent, CI, a pipe),
 or with `--json`, `-y`, `-g` or `--agents`, or with `AMDAHL_NO_PROMPT=1`.

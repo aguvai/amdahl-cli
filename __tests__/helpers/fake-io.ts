@@ -16,8 +16,10 @@ export interface FakeIo extends Io {
   stdinText: string
   /** What each prompt answers, in order; null stands for Ctrl+C. */
   answers: (string | null)[]
-  /** Every question asked. */
+  /** Every question asked; a menu is `<question> [<choice> | <choice>]`. */
   prompts: string[]
+  /** Whether each menu was asked for colour. */
+  selectColor: boolean[]
   run: Io['run'] & ReturnType<typeof vi.fn>
 }
 
@@ -53,6 +55,16 @@ export function fakeIo(env: Record<string, string | undefined> = {}, home?: stri
       if (answer === null) throw new PromptCancelled()
       return answer ?? ''
     },
+    // A menu answers from the same queue: '' picks the start row, a number picks that row, null is Ctrl+C.
+    select: async (question, choices, options) => {
+      io.prompts.push(`${question} [${choices.join(' | ')}]`)
+      io.selectColor.push(options?.color === true)
+      const answer = io.answers.shift()
+      if (answer === null) throw new PromptCancelled()
+      const n = Number(answer)
+      return answer && Number.isInteger(n) && n >= 1 && n <= choices.length ? n - 1 : (options?.initial ?? 0)
+    },
+    selectColor: [],
     uninterruptible: (fn) => fn(),
     run: vi.fn(async (): Promise<ProcessResult> => ({ code: -1, stdout: '', stderr: 'not found' })),
     openUrl: async (url) => {
