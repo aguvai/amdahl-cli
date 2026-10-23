@@ -17,13 +17,12 @@
 // nothing on a refusal.
 
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
 import { parseDocument } from 'yaml'
 import { str, type Ctx } from '../context'
 import { CliError, EXIT, exitForHttp, usageError } from '../errors'
 import { ArchiveError, readSkillArchive, type SkillArchive } from '../tar-gz'
-import { skillDirs, writeSkillFolder, type FilePlan } from './skills-folder'
+import { guide, nextStep, shouldGuide, shownPath, type SkillSummary } from './skills-guide'
+import { planInstall, refuseClashes, skillDirs, writeInstall, type FilePlan, type Payload, type Targets } from './skills-install'
 
 /** Where the skills library is published. */
 export const DEFAULT_SKILLS_SITE = 'https://amdahl.ai'
@@ -48,7 +47,7 @@ export const MAX_ARCHIVE_BYTES = 4 * 1024 * 1024
 
 const DIGEST_RE = /^sha256:([0-9a-f]{64})$/i
 const FRONT_MATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/
-const USAGE = 'Usage: amdahl skills add <publisher>/<skill> [-g] [--agents] [--force] [--site <origin>]'
+const USAGE = 'Usage: amdahl skills add <publisher>/<skill> [-y] [-g] [--agents] [--force] [--site <origin>]'
 
 /** One skill in the library. */
 export interface SkillRef {
@@ -117,12 +116,10 @@ async function get(ctx: Ctx, url: string, what: string, site: string, maxBytes: 
     signal.addEventListener('abort', () => reject(signal.reason), { once: true })
   })
   timedOut.catch(() => {})
-  const unreachable = (err: unknown) => {
-    if (signal.aborted) {
-      return new CliError('network_error', `No answer from ${url} within ${timeoutMs / 1000} seconds.`, EXIT.network)
-    }
-    const cause = err instanceof Error && err.cause instanceof Error ? ` (${err.cause.message})` : ''
-    return new CliError('network_error', `Could not reach ${site}: ${err instanceof Error ? err.message : String(err)}${cause}`, EXIT.network)
+  const retry = 'Nothing was written. Check your internet connection, then run the same command again.'
+  const unreachable = () => {
+    if (signal.aborted) return new CliError('network_error', `No answer from ${url} within ${timeoutMs / 1000} seconds.`, EXIT.network, retry)
+    return new CliError('network_error', `Could not reach ${new URL(site).host}.`, EXIT.network, retry)
   }
   const limit = maxBytes >= 1024 * 1024 ? `${maxBytes / 1024 / 1024} MB` : `${maxBytes / 1024} KB`
   const tooLarge = () =>
@@ -132,7 +129,7 @@ async function get(ctx: Ctx, url: string, what: string, site: string, maxBytes: 
   try {
     res = await Promise.race([fetch(url, { redirect: 'manual', signal }), timedOut])
   } catch (err) {
-    throw unreachable(err)
+    throw unreachable()
   }
   if (!res.ok) {
     await res.body?.cancel().catch(() => {})
@@ -161,7 +158,7 @@ async function get(ctx: Ctx, url: string, what: string, site: string, maxBytes: 
     }
   } catch (err) {
     await reader?.cancel().catch(() => {})
-    throw err instanceof CliError ? err : unreachable(err)
+    throw err instanceof CliError ? err : unreachable()
   }
   return Buffer.concat(chunks)
 }
@@ -171,6 +168,8 @@ export interface IndexEntry {
   type: 'skill-md' | 'archive'
   url: string
   sha256: string
+  description: string
+  version?: string
 }
 
 /**
@@ -203,7 +202,13 @@ export function readIndex(body: Buffer, indexUrl: string, ref: SkillRef, site: s
   }
   if (!url) throw bad(`gives ${ref.skill} no file URL`)
   if (url.origin !== site) throw bad(`points ${ref.skill} at ${url.origin}, not ${site}`)
-  return { type, url: url.href, sha256: digest[1].toLowerCase() }
+  return {
+    type,
+    url: url.href,
+    sha256: digest[1].toLowerCase(),
+    description: typeof entry.description === 'string' ? entry.description : '',
+    ...(typeof entry.version === 'string' && entry.version ? { version: entry.version } : {}),
+  }
 }
 
 /** Refuse downloaded bytes whose sha256 differs from the index digest. */
@@ -224,7 +229,7 @@ export function checkDigest(body: Buffer, fileUrl: string, sha256: string): void
  * matter, a string `name` equal to the index's and a non-empty string
  * `description`. `what` names the file in the message.
  */
-export function checkSkillMd(body: Buffer, what: string, ref: SkillRef): void {
+export function checkSkillMd(body: Buffer, what: string, ref: SkillRef): { description: string; version?: string } {
   const bad = (why: string) => new CliError('invalid_skill', `${what} is not a valid skill: ${why}.`, EXIT.general)
   let text: string
   try {
@@ -247,17 +252,20 @@ export function checkSkillMd(body: Buffer, what: string, ref: SkillRef): void {
   } catch (err) {
     throw bad(`its front matter could not be read (${err instanceof Error ? err.message : String(err)})`)
   }
-  const { name, description } = (meta && typeof meta === 'object' && !Array.isArray(meta) ? meta : {}) as Record<string, unknown>
+  const { name, description, version, metadata } = (meta && typeof meta === 'object' && !Array.isArray(meta) ? meta : {}) as Record<string, unknown>
   if (typeof name !== 'string') throw bad('its front matter has no string name')
   if (typeof description !== 'string' || description.trim() === '') throw bad('its front matter has no string description')
   if (name !== ref.skill) throw bad(`its front matter names it "${name}", but the index lists ${ref.skill}`)
+  const nested = metadata && typeof metadata === 'object' ? (metadata as Record<string, unknown>).version : undefined
+  const v = typeof version === 'string' ? version : typeof nested === 'string' ? nested : undefined
+  return { description, ...(v ? { version: v } : {}) }
 }
 
 /**
  * Unpack a folder skill's archive with our own reader and check its SKILL.md.
  * Call only after checkDigest: the bytes are then the ones the index promised.
  */
-export function readArchive(body: Buffer, url: string, ref: SkillRef): SkillArchive {
+export function readArchive(body: Buffer, url: string, ref: SkillRef): { archive: SkillArchive; meta: { description: string; version?: string } } {
   let archive: SkillArchive
   try {
     archive = readSkillArchive(body)
@@ -268,53 +276,12 @@ export function readArchive(body: Buffer, url: string, ref: SkillRef): SkillArch
   }
   const skillMd = archive.files.find((f) => f.path === 'SKILL.md')
   if (!skillMd) throw new CliError('invalid_skill', `${url} is not a valid skill: it has no SKILL.md at its root.`, EXIT.general)
-  checkSkillMd(skillMd.bytes, `The SKILL.md in ${url}`, ref)
-  return archive
+  return { archive, meta: checkSkillMd(skillMd.bytes, `The SKILL.md in ${url}`, ref) }
 }
 
-/** Every file `skills add` writes for a SKILL.md-only skill. */
-function targetPaths(ctx: Ctx, name: string): string[] {
-  return skillDirs(ctx, name).map((dir) => join(dir, 'SKILL.md'))
-}
-
-/** Compare each target with the new bytes, then write the ones that differ. */
-function writeSkill(ctx: Ctx, name: string, body: Buffer): FilePlan[] {
-  const plan: FilePlan[] = targetPaths(ctx, name).map((path) => {
-    let current: Buffer | null
-    try {
-      current = existsSync(path) ? readFileSync(path) : null
-    } catch (err) {
-      throw new CliError('write_failed', `Could not read ${path}: ${err instanceof Error ? err.message : String(err)}`, EXIT.general, 'Nothing was written.')
-    }
-    return { path, action: current === null ? 'wrote' : current.equals(body) ? 'unchanged' : 'replaced' }
-  })
-  const clashes = plan.filter((p) => p.action === 'replaced').map((p) => p.path)
-  if (clashes.length > 0 && ctx.flags.force !== true) {
-    throw new CliError(
-      'skill_exists',
-      `A different ${name} skill is already at ${clashes.join(' and ')}.`,
-      EXIT.general,
-      'Nothing was written. Run again with --force to replace it.'
-    )
-  }
-  const written: string[] = []
-  for (const p of plan) {
-    if (p.action === 'unchanged') continue
-    try {
-      mkdirSync(dirname(p.path), { recursive: true })
-      writeFileSync(p.path, body)
-    } catch (err) {
-      throw new CliError(
-        'write_failed',
-        `Could not write ${p.path}: ${err instanceof Error ? err.message : String(err)}`,
-        EXIT.general,
-        written.length > 0 ? `It wrote ${written.join(' and ')} first.` : 'Nothing was written.'
-      )
-    }
-    written.push(p.path)
-  }
-  return plan
-}
+/** The note for an install that asked nothing and was given no place: where it went, and how to choose. */
+const DEFAULTS_NOTE =
+  'Added for Claude Code in this project, the default. For every project add -g; for Codex, Cursor and other agents add --agents.'
 
 /** `amdahl skills add <publisher>/<skill>`. */
 export async function skillsAdd(ctx: Ctx, args: string[]): Promise<number> {
@@ -323,29 +290,71 @@ export async function skillsAdd(ctx: Ctx, args: string[]): Promise<number> {
   const site = siteFlag ? normaliseSite(siteFlag) : DEFAULT_SKILLS_SITE
   const ref = parseSkillRef(args[0], site)
 
+  // Download and check everything first: nothing is written, and no question is asked, until it passes.
   const indexUrl = `${site}/skills/${ref.publisher}/${ref.skill}/.well-known/agent-skills/index.json`
-  const { type, url, sha256 } = readIndex(await get(ctx, indexUrl, 'skill index', site, MAX_INDEX_BYTES), indexUrl, ref, site)
-  const line = (f: FilePlan, count = '') =>
-    f.action === 'unchanged' ? `Already up to date: ${f.path}` : `${f.action === 'wrote' ? 'Wrote' : 'Replaced'} ${f.path}${count}`
-  const result = { ok: true, publisher: ref.publisher, skill: ref.skill, url, digest: `sha256:${sha256}` }
-
+  const entry = readIndex(await get(ctx, indexUrl, 'skill index', site, MAX_INDEX_BYTES), indexUrl, ref, site)
+  const { type, url, sha256 } = entry
+  let payload: Payload
+  let meta: { description: string; version?: string }
   if (type === 'archive') {
     const body = await get(ctx, url, 'skill archive', site, MAX_ARCHIVE_BYTES)
     checkDigest(body, url, sha256)
-    const archive = readArchive(body, url, ref)
-    const files = writeSkillFolder(ctx, ref.skill, archive)
-    const contents = archive.files.map((f) => f.path)
-    const count = ` (${contents.length} file${contents.length === 1 ? '' : 's'})`
-    const lines = files.map((f) => line(f, count))
-    if (files.some((f) => f.action !== 'unchanged')) lines.push(...contents.map((p) => `  ${p}`))
-    ctx.out.result({ ...result, files, contents }, lines.join('\n'))
-    return EXIT.ok
+    const read = readArchive(body, url, ref)
+    payload = { type, archive: read.archive }
+    meta = read.meta
+  } else {
+    const body = await get(ctx, url, 'SKILL.md', site, MAX_SKILL_BYTES)
+    checkDigest(body, url, sha256)
+    meta = checkSkillMd(body, url, ref)
+    payload = { type, body }
   }
 
-  const body = await get(ctx, url, 'SKILL.md', site, MAX_SKILL_BYTES)
-  checkDigest(body, url, sha256)
-  checkSkillMd(body, url, ref)
-  const files = writeSkill(ctx, ref.skill, body)
-  ctx.out.result({ ...result, files }, files.map((f) => line(f)).join('\n'))
+  const guided = shouldGuide(ctx)
+  let targets: Targets
+  let plan: FilePlan[]
+  if (guided) {
+    const summary: SkillSummary = {
+      name: ref.skill,
+      publisher: ref.publisher,
+      description: entry.description || meta.description,
+      version: entry.version ?? meta.version,
+      sha256,
+      host: new URL(site).host,
+    }
+    const settled = await guide(ctx, summary, payload)
+    targets = settled.targets
+    plan = settled.plan
+    if (settled.kind === 'kept') {
+      ctx.out.info(`Kept your copy of ${ref.skill}. Nothing was written.`)
+      return EXIT.ok
+    }
+    if (settled.kind === 'install') writeInstall(ctx.io, plan, ref.skill, payload)
+  } else {
+    targets = { base: ctx.flags.global === true ? ctx.io.homedir : ctx.io.cwd, claude: true, agents: ctx.flags.agents === true }
+    plan = planInstall(skillDirs(targets, ref.skill), payload)
+    refuseClashes(plan, ref.skill, ctx.flags.force === true)
+    writeInstall(ctx.io, plan, ref.skill, payload)
+  }
+
+  const contents = payload.type === 'archive' ? payload.archive.files.map((f) => f.path) : undefined
+  const count = contents ? ` (${contents.length} file${contents.length === 1 ? '' : 's'})` : ''
+  const lines = plan.map((f) =>
+    f.action === 'unchanged' ? `Already up to date: ${f.path}` : `${f.action === 'wrote' ? 'Wrote' : 'Replaced'} ${f.path}${count}`
+  )
+  if (contents && plan.some((f) => f.action !== 'unchanged')) lines.push(...contents.map((p) => `  ${p}`))
+  const result = { ok: true, publisher: ref.publisher, skill: ref.skill, url, digest: `sha256:${sha256}`, files: plan }
+  if (guided) {
+    // A person gets the folders in the short form they would type; the file list is for scripts.
+    const changed = plan.filter((f) => f.action !== 'unchanged')
+    const short =
+      changed.length > 0
+        ? [`Done. Added ${ref.skill}${count} to:`, ...changed.map((f) => `  ${shownPath(ctx, f.path)}`)]
+        : plan.map((f) => `Already up to date: ${shownPath(ctx, f.path)}`)
+    ctx.out.result(result, short.join('\n'))
+    ctx.out.info(`\n${nextStep(ctx, targets)}`)
+    return EXIT.ok
+  }
+  ctx.out.result(contents ? { ...result, contents } : result, lines.join('\n'))
+  if (!ctx.out.json && ctx.flags.global !== true && ctx.flags.agents !== true && ctx.flags.yes !== true) ctx.out.info(DEFAULTS_NOTE)
   return EXIT.ok
 }

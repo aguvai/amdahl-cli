@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { vi } from 'vitest'
-import type { Io, ProcessResult } from '../../src/io'
+import { PromptCancelled, type Io, type ProcessResult } from '../../src/io'
 import { runCli } from '../../src/main'
 
 export interface FakeIo extends Io {
@@ -14,7 +14,10 @@ export interface FakeIo extends Io {
   err: string[]
   opened: string[]
   stdinText: string
-  answers: string[]
+  /** What each prompt answers, in order; null stands for Ctrl+C. */
+  answers: (string | null)[]
+  /** Every question asked. */
+  prompts: string[]
   run: Io['run'] & ReturnType<typeof vi.fn>
 }
 
@@ -36,13 +39,21 @@ export function fakeIo(env: Record<string, string | undefined> = {}, home?: stri
     opened: [],
     stdinText: '',
     answers: [],
+    prompts: [],
     env: { XDG_CONFIG_HOME: join(dir, 'config'), AMDAHL_CREDENTIAL_STORE: 'file', ...env },
     stdout: (t) => void io.out.push(t),
     stderr: (t) => void io.err.push(t),
     stdinIsTTY: true,
+    stdoutIsTTY: false,
     stderrIsTTY: false,
     readStdin: async () => io.stdinText,
-    prompt: async () => io.answers.shift() ?? '',
+    prompt: async (question) => {
+      io.prompts.push(question)
+      const answer = io.answers.shift()
+      if (answer === null) throw new PromptCancelled()
+      return answer ?? ''
+    },
+    uninterruptible: (fn) => fn(),
     run: vi.fn(async (): Promise<ProcessResult> => ({ code: -1, stdout: '', stderr: 'not found' })),
     openUrl: async (url) => {
       io.opened.push(url)

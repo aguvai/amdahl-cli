@@ -51,6 +51,7 @@ const COMMAND_OPTIONS: Record<string, OptionSpec> = {
   'workspace use': {},
   install: { print: { type: 'boolean' }, force: { type: 'boolean' } },
   'skills add': {
+    yes: { type: 'boolean', short: 'y' },
     global: { type: 'boolean', short: 'g' },
     agents: { type: 'boolean' },
     force: { type: 'boolean' },
@@ -156,7 +157,7 @@ Commands:
   keys revoke <id|prefix> [--yes] [--no-browser]
   workspace list | workspace use <profile>
   install claude-code|codex|cursor [--print] [--force]
-  skills add <publisher>/<skill> [-g] [--agents] [--force] [--site <origin>]
+  skills add <publisher>/<skill> [-y] [-g] [--agents] [--force] [--site <origin>]
 
 Global options:
   --profile <name>   Use a saved profile (default: AMDAHL_PROFILE, then the default profile)

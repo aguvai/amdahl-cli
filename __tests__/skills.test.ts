@@ -68,7 +68,8 @@ describe('skills add', () => {
     const r = await cli(io, 'skills', 'add', 'amdahl/call-prep')
     expect(r.code).toBe(0)
     expect(r.stdout).toBe(`Wrote ${projectSkill(io)}\n`)
-    expect(r.stderr).toBe('')
+    // No terminal to ask, so it says where it went and how to choose.
+    expect(r.stderr).toBe('Added for Claude Code in this project, the default. For every project add -g; for Codex, Cursor and other agents add --agents.\n')
     expect(readFileSync(projectSkill(io), 'utf8')).toBe(SKILL)
     // Exactly two requests, both to the site, with no redirect followed and a deadline each.
     expect(fetchMock.mock.calls).toEqual([
@@ -258,7 +259,11 @@ describe('skills add', () => {
       const io = fakeIo()
       const r = await cli(io, 'skills', 'add', 'amdahl/call-prep', '--json')
       expect(r.code).toBe(8)
-      expect(r.json.error).toEqual({ code: 'network_error', message: `No answer from ${url} within 0.1 seconds.` })
+      expect(r.json.error).toEqual({
+        code: 'network_error',
+        message: `No answer from ${url} within 0.1 seconds.`,
+        hint: 'Nothing was written. Check your internet connection, then run the same command again.',
+      })
       expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(calls)
       expect(existsSync(join(io.cwd, '.claude'))).toBe(false)
     },
@@ -316,7 +321,11 @@ describe('skills add', () => {
     vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('fetch failed'))))
     const down = await cli(fakeIo(), 'skills', 'add', 'amdahl/call-prep', '--json')
     expect(down.code).toBe(8)
-    expect(down.json.error.code).toBe('network_error')
+    expect(down.json.error).toEqual({
+      code: 'network_error',
+      message: 'Could not reach amdahl.ai.',
+      hint: 'Nothing was written. Check your internet connection, then run the same command again.',
+    })
   })
 
   it('rejects anything that is not one skill on the site, before any request', async () => {

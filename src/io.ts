@@ -26,6 +26,14 @@ export type RunProcess = (
   options?: { input?: string }
 ) => Promise<ProcessResult>
 
+/** A prompt the person stopped with Ctrl+C or Ctrl+D: nothing was answered. */
+export class PromptCancelled extends Error {
+  constructor() {
+    super('Cancelled.')
+    this.name = 'PromptCancelled'
+  }
+}
+
 /** The CLI's view of the outside world. */
 export interface Io {
   env: Record<string, string | undefined>
@@ -33,11 +41,15 @@ export interface Io {
   stderr: (text: string) => void
   /** True when stdin is a terminal (a person can answer prompts). */
   stdinIsTTY: boolean
+  /** True when stdout is a terminal (a person is reading, not a pipe). */
+  stdoutIsTTY: boolean
   /** True when stderr is a terminal (colour is allowed). */
   stderrIsTTY: boolean
   readStdin: () => Promise<string>
-  /** Ask one question on the terminal and return the answer line. */
+  /** Ask one question on the terminal and return the answer line. Rejects with PromptCancelled on Ctrl+C or Ctrl+D. */
   prompt: (question: string) => Promise<string>
+  /** Run synchronous file writes that Ctrl+C must not cut off half way. */
+  uninterruptible: <T>(fn: () => T) => T
   run: RunProcess
   /** Open a URL in the default browser. Never throws. */
   openUrl: (url: string) => Promise<void>
@@ -82,15 +94,42 @@ async function readAllStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8')
 }
 
-/** Ask one question on stderr and read one line from stdin. */
+/** Ask one question on stderr and read one line from stdin. Ctrl+C or Ctrl+D rejects with PromptCancelled. */
 function promptLine(question: string): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stderr })
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const cancel = () => {
+      if (settled) return
+      settled = true
+      process.stderr.write('\n')
+      rl.close()
+      reject(new PromptCancelled())
+    }
+    rl.on('SIGINT', cancel)
+    rl.on('close', cancel)
     rl.question(question, (answer) => {
+      settled = true
       rl.close()
       resolve(answer)
     })
   })
+}
+
+/**
+ * Hold Ctrl+C while `fn` runs. `fn` is synchronous, so a SIGINT that arrives
+ * meanwhile is handled (and dropped) only after it has finished: an install
+ * is never left half written.
+ */
+function uninterruptible<T>(fn: () => T): T {
+  const hold = () => {}
+  process.on('SIGINT', hold)
+  try {
+    return fn()
+  } finally {
+    // Let a SIGINT queued during fn reach `hold` before the default comes back.
+    setImmediate(() => process.off('SIGINT', hold))
+  }
 }
 
 /** The browser opener for each platform. The URL is not a secret. */
@@ -107,9 +146,11 @@ export function realIo(): Io {
     stdout: (text) => process.stdout.write(text),
     stderr: (text) => process.stderr.write(text),
     stdinIsTTY: Boolean(process.stdin.isTTY),
+    stdoutIsTTY: Boolean(process.stdout.isTTY),
     stderrIsTTY: Boolean(process.stderr.isTTY),
     readStdin: readAllStdin,
     prompt: promptLine,
+    uninterruptible,
     run: runProcess,
     openUrl: async (url) => {
       const [cmd, args] = openerFor(process.platform, url)

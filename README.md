@@ -121,6 +121,30 @@ npx amdahl skills add <publisher>/<skill>
 npx amdahl skills add https://amdahl.ai/skills/<publisher>/<skill>
 ```
 
+In a terminal, it walks you through the install. It first downloads and
+checks the skill, then shows what it is (name, publisher, files, checksum)
+before it writes anything. Then it asks only what it cannot work out, and
+the recommended answer is already chosen, so Enter is always right:
+
+- **Where:** this project only (recommended), or every project. It does not
+  ask when you run it from your home folder.
+- **Which agents:** Claude Code (`.claude/skills`), Codex, Cursor and other
+  agents (`.agents/skills`), or both (recommended). It does not ask when it
+  sees only one kind in use: a `.claude` folder here or in your home folder,
+  or `CLAUDECODE` set, means Claude Code; `.agents`, `.codex` or `.cursor`
+  means the others.
+- **Replace:** only when a different copy is already there. Enter keeps
+  yours; type `y` to replace it.
+
+Then press Enter to add it. It ends with what to do next. Ctrl+C at any
+question stops it with nothing written (exit 130).
+
+It never asks when stdin or stdout is not a terminal (an agent, CI, a pipe),
+or with `--json`, `-y`, `-g` or `--agents`, or with `AMDAHL_NO_PROMPT=1`.
+Then it uses the flags: with none, it adds the skill for Claude Code in this
+project, and says so. `-y` (`--yes`) takes those defaults without asking.
+Neither replaces a different copy without `--force`.
+
 It reads the skill's index,
 `https://amdahl.ai/skills/<publisher>/<skill>/.well-known/agent-skills/index.json`
 ([Agent Skills Discovery](https://schemas.agentskills.io/discovery/0.2.0/schema.json)
@@ -152,11 +176,12 @@ An archive must also be a plain folder. `skills add` refuses it if:
 - it has more than 200 files, or more than 4 MB of file contents;
 - SKILL.md is not at its root.
 
-It writes the skill to these places, and prints each path it wrote:
+Without the questions, the flags say where it writes, and it prints each
+path it wrote:
 
 | flag | where |
 |---|---|
-| (none) | `./.claude/skills/<name>/`, for Claude Code in this project |
+| (none) or `-y` | `./.claude/skills/<name>/`, for Claude Code in this project |
 | `-g`, `--global` | `~/.claude/skills/<name>/`, for every project |
 | `--agents` | also `.agents/skills/<name>/` (in this project, or in `~` with `-g`), which Codex, Cursor and most other agents read |
 
@@ -224,6 +249,7 @@ code shown in the terminal; then the key is printed once and stored nowhere.
 | 6 | rate limited or quota (429) |
 | 7 | approval denied, expired or locked out |
 | 8 | network or 5xx |
+| 130 | stopped with Ctrl+C at a question (nothing was written) |
 
 ## Development
 

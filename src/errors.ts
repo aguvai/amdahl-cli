@@ -15,6 +15,7 @@ export const EXIT = {
   rateLimited: 6,
   denied: 7,
   network: 8,
+  cancelled: 130,
 } as const
 
 /** One of the {@link EXIT} values. */

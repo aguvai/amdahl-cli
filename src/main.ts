@@ -77,7 +77,8 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
       if (e.hint) error.hint = e.hint
       io.stdout(`${JSON.stringify({ ok: false, error })}\n`)
     } else {
-      io.stderr(`Error: ${e.message}\n${e.hint ? `${e.hint}\n` : ''}`)
+      // A person who pressed Ctrl+C gets a plain line, not an error.
+      io.stderr(`${e.code === 'cancelled' ? '' : 'Error: '}${e.message}\n${e.hint ? `${e.hint}\n` : ''}`)
     }
     return e.exit
   }

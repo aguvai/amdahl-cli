@@ -79,7 +79,7 @@ describe('skills add, folder skill', () => {
     const io = fakeIo()
     const r = await cli(io, 'skills', 'add', 'amdahl/system-diagram')
     expect(r.code).toBe(0)
-    expect(r.stderr).toBe('')
+    expect(r.stderr).toBe('Added for Claude Code in this project, the default. For every project add -g; for Codex, Cursor and other agents add --agents.\n')
     expect(r.stdout).toBe(`Wrote ${projectDir(io)} (6 files)\n${CONTENTS.map((p) => `  ${p}`).join('\n')}\n`)
     expect(listFiles(projectDir(io))).toEqual(CONTENTS)
     for (const [path, spec] of Object.entries(FILES)) expect(readFileSync(join(projectDir(io), path)).equals(bodyOf(spec))).toBe(true)
@@ -145,7 +145,7 @@ describe('skills add, folder skill', () => {
     const kept = await cli(io, 'skills', 'add', 'amdahl/system-diagram')
     expect(kept.code).toBe(1)
     expect(kept.stderr).toBe(
-      `Error: A different system-diagram skill is already at ${projectDir(io)}.\nNothing was written. Run again with --force to replace that folder.\n`
+      `Error: A different system-diagram skill is already at ${projectDir(io)}.\nNothing was written. Run again with --force to replace it.\n`
     )
     expect(listFiles(projectDir(io))).toEqual(['SKILL.md', 'notes.md'])
 
