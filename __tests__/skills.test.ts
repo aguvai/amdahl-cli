@@ -3,7 +3,7 @@
 // overwrite guard, the deadline and size caps, --site and the reference forms.
 
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MAX_INDEX_BYTES, MAX_SKILL_BYTES } from '../src/commands/skills'
@@ -192,6 +192,70 @@ describe('skills add', () => {
 
     const again = await cli(io, 'skills', 'add', 'amdahl/call-prep', '--json')
     expect(again.json.files).toEqual([{ path: projectSkill(io), action: 'unchanged' }])
+  })
+
+  describe('refuses to write through a link at the destination', () => {
+    /** A folder outside the project, next to it. */
+    const outside = (io: FakeIo) => {
+      const dir = join(io.homedir, 'outside')
+      mkdirSync(dir, { recursive: true })
+      return dir
+    }
+    const refused = (io: FakeIo, part: string) => ({
+      code: 'link_in_the_way',
+      message: `Could not write ${projectSkill(io)}: ${part} is a link.`,
+      hint: 'Nothing was written. Remove it, or install somewhere else.',
+    })
+
+    it('a SKILL.md link to a missing file, without --force', async () => {
+      serveSkill()
+      const io = fakeIo()
+      const victim = join(outside(io), 'victim.txt')
+      mkdirSync(join(io.cwd, '.claude', 'skills', 'call-prep'), { recursive: true })
+      symlinkSync(victim, projectSkill(io))
+      const r = await cli(io, 'skills', 'add', 'amdahl/call-prep', '--json')
+      expect(r.code).toBe(1)
+      expect(r.json.error).toEqual(refused(io, projectSkill(io)))
+      expect(existsSync(victim)).toBe(false)
+      expect(lstatSync(projectSkill(io)).isSymbolicLink()).toBe(true)
+    })
+
+    it('a SKILL.md link to a file that exists, even with --force', async () => {
+      serveSkill()
+      const io = fakeIo()
+      const victim = join(outside(io), 'victim.txt')
+      writeFileSync(victim, 'keep me\n')
+      mkdirSync(join(io.cwd, '.claude', 'skills', 'call-prep'), { recursive: true })
+      symlinkSync(victim, projectSkill(io))
+      const r = await cli(io, 'skills', 'add', 'amdahl/call-prep', '--force', '--json')
+      expect(r.code).toBe(1)
+      expect(r.json.error).toEqual(refused(io, projectSkill(io)))
+      expect(readFileSync(victim, 'utf8')).toBe('keep me\n')
+    })
+
+    it('a linked skill folder', async () => {
+      serveSkill()
+      const io = fakeIo()
+      const folder = join(io.cwd, '.claude', 'skills', 'call-prep')
+      mkdirSync(join(io.cwd, '.claude', 'skills'), { recursive: true })
+      symlinkSync(outside(io), folder)
+      const r = await cli(io, 'skills', 'add', 'amdahl/call-prep', '--force', '--json')
+      expect(r.code).toBe(1)
+      expect(r.json.error).toEqual(refused(io, folder))
+      expect(readdirSync(outside(io))).toEqual([])
+    })
+
+    it('a linked parent folder under the project', async () => {
+      serveSkill()
+      const io = fakeIo()
+      const skills = join(io.cwd, '.claude', 'skills')
+      mkdirSync(join(io.cwd, '.claude'), { recursive: true })
+      symlinkSync(outside(io), skills)
+      const r = await cli(io, 'skills', 'add', 'amdahl/call-prep', '--json')
+      expect(r.code).toBe(1)
+      expect(r.json.error).toEqual(refused(io, skills))
+      expect(readdirSync(outside(io))).toEqual([])
+    })
   })
 
   it('checks every target before it writes any', async () => {

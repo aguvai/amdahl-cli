@@ -6,7 +6,8 @@
 // `<site>/skills/<publisher>/<skill>/.well-known/agent-skills/index.json`,
 // then fetches what the entry names: a SKILL.md (`type: skill-md`) or a
 // tar.gz of the skill's folder (`type: archive`). It refuses the download
-// unless its sha256 matches the entry's digest, and refuses an archive that
+// unless its sha256 matches the entry's digest (from the same site, so this
+// catches a corrupted download, not a changed one), and refuses an archive that
 // our own reader (src/tar-gz.ts) does not pass. Either way the SKILL.md must
 // have YAML front matter with a string `name` (the index's) and
 // `description`. Needs no sign-in. Makes exactly these two requests, both to

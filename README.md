@@ -178,7 +178,10 @@ It refuses the download, and writes nothing, unless all of these are true:
 
 - The index points at a file on the same site.
 - The sha256 of the downloaded bytes equals the index's `digest`. This is
-  checked before anything in an archive is read.
+  checked before anything in an archive is read. The index and the file come
+  from the same site, so this only catches a corrupted or cut-off download.
+  It is not a signature and does not show the file is unchanged: that rests
+  on HTTPS and on who can publish to amdahl.ai/skills.
 - The SKILL.md front matter parses as YAML, `name` is a string, and
   `description` is a string that is not empty.
 - `name` equals the skill's name in the index.
@@ -204,7 +207,10 @@ path it wrote:
 | `-g`, `--global` | `~/.claude/skills/<name>/`, for every project |
 | `--agents` | also `.agents/skills/<name>/` (in this project, or in `~` with `-g`), which Codex, Cursor and most other agents read |
 
-A `skill-md` skill writes `SKILL.md` in that folder, exactly as downloaded.
+A `skill-md` skill writes `SKILL.md` in that folder, exactly as downloaded,
+through a temp file renamed into place. It refuses, even with `--force`, when
+the skill folder, the `skills` or `.claude`/`.agents` folder above it, or
+`SKILL.md` itself is a symbolic link, so it never writes outside that folder.
 An `archive` skill unpacks into a hidden temp folder beside each target,
 then renames it into place only when every target is complete. If any step
 fails, it removes what it unpacked and puts back any folder it replaced.
@@ -313,16 +319,23 @@ Check it with `npm audit signatures` or on the package page on npmjs.com.
 
 The workflow publishes `amdahl` (the short name) right after `@amdahl/cli`,
 from the same run, only when the repository variable `NPM_PUBLISH_AMDAHL` is
-`true`. Trusted publishing can be set up for a package only after it exists,
-so the first version of `amdahl` is published by hand, once:
+`true`. Amdahl already holds the `amdahl` name on npm (a 0.0.1 placeholder
+with no bin), so trusted publishing can be set up for it now. Before you push
+the tag:
 
-1. Publish `@amdahl/cli` at that version with the tag, as above.
-2. From that run, download the `tarball` artifact. It holds
-   `amdahl-<version>.tgz`, already checked by the run.
-3. As an npm user who is an owner of the `amdahl` org, with 2FA:
-   `npm publish amdahl-<version>.tgz --access public`.
-4. Give the org's team write access: `npm access grant read-write amdahl:<team> amdahl`.
-5. On npmjs.com, `amdahl`, Settings, add a trusted publisher: GitHub Actions,
+1. On npmjs.com, `amdahl`, Settings, add a trusted publisher: GitHub Actions,
    `amdahlco/amdahl-cli`, workflow `publish.yml`, environment `npm`.
-6. Set the repository variable `NPM_PUBLISH_AMDAHL` to `true`. From then on,
-   each `cli-v<version>` tag publishes both packages.
+2. Set the repository variable `NPM_PUBLISH_AMDAHL` to `true`.
+
+Then each `cli-v<version>` tag publishes both packages from CI, both with
+provenance. Each publish step skips a version already on npm, so if the
+`amdahl` step fails, use **Re-run failed jobs** on that run. (Re-running every
+job stops at the check that the version is not on npm yet.)
+
+Only if CI cannot publish `amdahl`, publish it by hand as a fallback: download
+the `tarball` artifact from the run (it holds `amdahl-<version>.tgz`, already
+checked), then, as an owner of the `amdahl` npm org with 2FA, run
+`npm publish amdahl-<version>.tgz --access public --provenance=false`.
+`publishConfig` asks for provenance, which a laptop cannot give, so without
+`--provenance=false` the publish is expected to fail. That version has no
+provenance.

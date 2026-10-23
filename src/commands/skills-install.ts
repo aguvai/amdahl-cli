@@ -10,9 +10,11 @@
 // when every one is complete are they renamed into place. A failure at any
 // step removes the temp folders, puts back any folder it had moved aside,
 // and removes the parent folders it created: nothing is left. A SKILL.md-only
-// skill writes the one file in each target.
+// skill writes the one file in each target, through a temp file renamed over
+// it, and refuses a target with a link anywhere under the install root.
 
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { CliError, EXIT } from '../errors'
 import type { Io } from '../io'
@@ -55,10 +57,12 @@ function plainReason(err: unknown): string {
   return message(err)
 }
 
+const leftBehind = (written: string[]) => (written.length > 0 ? `It wrote ${written.join(' and ')} first.` : 'Nothing was written.')
+
 /** The error for a failed write, saying what was left behind and the one thing to do. */
 export function writeFailure(path: string, err: unknown, written: string[] = []): CliError {
   const code = (err as NodeJS.ErrnoException).code
-  const left = written.length > 0 ? `It wrote ${written.join(' and ')} first.` : 'Nothing was written.'
+  const left = leftBehind(written)
   const fix = code === 'EACCES' || code === 'EPERM' ? ' Run the command from a folder you can write to.' : ''
   return new CliError('write_failed', `Could not write ${path}: ${plainReason(err)}`, EXIT.general, `${left}${fix}`)
 }
@@ -105,6 +109,34 @@ export function sameFolder(dir: string, archive: SkillArchive): boolean | null {
   }
 }
 
+/**
+ * Refuse a SKILL.md path that goes through a link, or that is not a plain
+ * file: the write would land wherever the link points, outside the install
+ * root. Checks each part under the root that `skillDirs` builds (`.claude` or
+ * `.agents`, `skills`, the skill folder) and the file itself.
+ */
+function refuseLinks(path: string, written: string[] = []): void {
+  const dir = dirname(path)
+  for (const part of [dirname(dirname(dir)), dirname(dir), dir, path]) {
+    let stat
+    try {
+      stat = lstatSync(part)
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw writeFailure(path, err, written)
+    }
+    const why = stat.isSymbolicLink() ? 'is a link' : part === path && !stat.isFile() ? 'is not a file' : ''
+    if (why) {
+      throw new CliError(
+        'link_in_the_way',
+        `Could not write ${path}: ${part} ${why}.`,
+        EXIT.general,
+        `${leftBehind(written)} Remove it, or install somewhere else.`
+      )
+    }
+  }
+}
+
 /** What installing `payload` into each skill folder would do. */
 export function planInstall(dirs: string[], payload: Payload): FilePlan[] {
   return dirs.map((dir) => {
@@ -113,9 +145,10 @@ export function planInstall(dirs: string[], payload: Payload): FilePlan[] {
       return { path: dir, action: same === null ? 'wrote' : same ? 'unchanged' : 'replaced' }
     }
     const path = join(dir, 'SKILL.md')
+    refuseLinks(path)
     let current: Buffer | null
     try {
-      current = existsSync(path) ? readFileSync(path) : null
+      current = lstatSync(path, { throwIfNoEntry: false }) ? readFileSync(path) : null
     } catch (err) {
       throw writeFailure(path, err)
     }
@@ -203,15 +236,26 @@ function writeFolders(plan: FilePlan[], name: string, archive: SkillArchive): vo
   for (const s of staged) if (s.backup) rmSync(s.backup, { recursive: true, force: true })
 }
 
-/** Write the SKILL.md into every planned path that differs. */
+/**
+ * Write the SKILL.md into every planned path that differs: into a new temp
+ * file in the same folder, renamed over the old one. A rename replaces what
+ * is at the path instead of following it.
+ */
 function writeFiles(plan: FilePlan[], body: Buffer): void {
   const written: string[] = []
   for (const p of plan) {
     if (p.action === 'unchanged') continue
+    // Again: in the guided flow, time has passed since the plan.
+    refuseLinks(p.path, written)
+    const temp = join(dirname(p.path), `.SKILL.md.amdahl-tmp-${randomBytes(6).toString('hex')}`)
     try {
       mkdirSync(dirname(p.path), { recursive: true })
-      writeFileSync(p.path, body)
+      refuseLinks(p.path, written)
+      writeFileSync(temp, body, { flag: 'wx', mode: 0o644 })
+      renameSync(temp, p.path)
     } catch (err) {
+      rmSync(temp, { force: true })
+      if (err instanceof CliError) throw err
       throw writeFailure(p.path, err, written)
     }
     written.push(p.path)
