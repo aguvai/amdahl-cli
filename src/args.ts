@@ -139,7 +139,8 @@ What you can do:
   amdahl keys create --name ci   Make an API key for a server or CI
   amdahl install claude-code     Connect your AI client (also codex, cursor)
   amdahl skills add <publisher>/<skill>
-                                 Add a skill from https://amdahl.ai/skills to this project
+                                 Add a skill from https://amdahl.ai/skills to this project:
+                                 its SKILL.md, or its whole folder
   For everything Amdahl can do: https://docs.amdahl.ai/skills/amdahl/SKILL.md
 
 Commands:

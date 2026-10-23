@@ -120,34 +120,59 @@ npx @amdahl/cli skills add https://amdahl.ai/skills/<publisher>/<skill>
 It reads the skill's index,
 `https://amdahl.ai/skills/<publisher>/<skill>/.well-known/agent-skills/index.json`
 ([Agent Skills Discovery](https://schemas.agentskills.io/discovery/0.2.0/schema.json)
-v0.2.0), then downloads the SKILL.md that the index names. It refuses the file,
-and writes nothing, unless all of these are true:
+v0.2.0). The index lists one of two kinds of skill:
 
-- The sha256 of the downloaded bytes equals the index's `digest`.
-- The front matter parses as YAML, `name` is a string, and `description` is
-  a string that is not empty.
-- `name` equals the skill's name in the index.
+- `type: "skill-md"`: one SKILL.md. `skills add` downloads it.
+- `type: "archive"`: a folder (the SKILL.md plus scripts, references and
+  other files), as one `.tar.gz`. `skills add` downloads it and unpacks it
+  with its own reader. It never runs `tar`.
+
+It refuses the download, and writes nothing, unless all of these are true:
+
 - The index points at a file on the same site.
+- The sha256 of the downloaded bytes equals the index's `digest`. This is
+  checked before anything in an archive is read.
+- The SKILL.md front matter parses as YAML, `name` is a string, and
+  `description` is a string that is not empty.
+- `name` equals the skill's name in the index.
 
-It writes the file exactly as downloaded, and prints each path it wrote:
+An archive must also be a plain folder. `skills add` refuses it if:
 
-| flag | file |
+- the gzip CRC-32 or length does not match, or bytes follow the gzip data;
+- a tar header has a wrong checksum, is not ustar, or the tar has no end;
+- a path is absolute, holds `..`, `.` or an empty segment, a backslash or a
+  control character, or two entries share a path (also when only the
+  case differs);
+- an entry is not a file or a folder (a link, a device, a pax header);
+- a file mode is not 0644 or 0755;
+- it has more than 200 files, or more than 4 MB of file contents;
+- SKILL.md is not at its root.
+
+It writes the skill to these places, and prints each path it wrote:
+
+| flag | where |
 |---|---|
-| (none) | `./.claude/skills/<name>/SKILL.md`, for Claude Code in this project |
-| `-g`, `--global` | `~/.claude/skills/<name>/SKILL.md`, for every project |
-| `--agents` | also `.agents/skills/<name>/SKILL.md` (in this project, or in `~` with `-g`), which Codex, Cursor and most other agents read |
+| (none) | `./.claude/skills/<name>/`, for Claude Code in this project |
+| `-g`, `--global` | `~/.claude/skills/<name>/`, for every project |
+| `--agents` | also `.agents/skills/<name>/` (in this project, or in `~` with `-g`), which Codex, Cursor and most other agents read |
 
-If a different file with that name is already there, `skills add` stops
-before it writes anything; add `--force` to replace it. A file that is
-already identical is left as it is.
+A `skill-md` skill writes `SKILL.md` in that folder, exactly as downloaded.
+An `archive` skill unpacks into a hidden temp folder beside each target,
+then renames it into place only when every target is complete. If any step
+fails, it removes what it unpacked and puts back any folder it replaced.
+
+If a different file or folder with that name is already there, `skills add`
+stops before it writes anything. Add `--force` to replace it. For a folder
+skill, `--force` replaces the whole folder, with any files you added to it.
+A skill that is already identical is left as it is.
 
 It sends two requests, both to amdahl.ai: the index, then the file. It
 follows no redirect and sends no telemetry. It waits at most 15 seconds for
-each request. It refuses an index over 256 KB and a SKILL.md over 64 KB (the
-most amdahl.ai accepts). Either refusal writes nothing. `--site <origin>` sends both
-requests to another origin, for example a local copy of the site
-(`--site http://localhost:6782`). The origin must be `https`; `http` is
-allowed only for localhost.
+each request. It refuses an index over 256 KB, a SKILL.md over 64 KB (the
+most amdahl.ai accepts) and an archive over 4 MB. Each refusal writes
+nothing. `--site <origin>` sends both requests to another origin, for
+example a local copy of the site (`--site http://localhost:6782`). The
+origin must be `https`; `http` is allowed only for localhost.
 
 ## Targeting staging
 

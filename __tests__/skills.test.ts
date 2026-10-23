@@ -237,7 +237,7 @@ describe('skills add', () => {
     ['not JSON', 'nope', 'is not JSON'],
     ['no skills list', '{"skills": {}}', 'has no skills list'],
     ['another skill only', indexFor(SKILL, { name: 'other' }), 'does not list call-prep'],
-    ['the wrong type', indexFor(SKILL, { type: 'archive' }), 'lists call-prep as a type other than skill-md'],
+    ['the wrong type', indexFor(SKILL, { type: 'zip' }), 'lists call-prep as a type other than skill-md or archive'],
     ['a bad digest', indexFor(SKILL, { digest: 'md5:abc' }), 'gives call-prep no sha256 digest'],
   ])('refuses an index with %s', async (_label, body, why) => {
     serve({ [INDEX]: body, [FILE]: SKILL })

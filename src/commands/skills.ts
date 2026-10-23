@@ -4,13 +4,17 @@
 // install one skill from the library at amdahl.ai/skills. Reads the skill's
 // one-entry index (Agent Skills Discovery v0.2.0) at
 // `<site>/skills/<publisher>/<skill>/.well-known/agent-skills/index.json`,
-// fetches the SKILL.md the entry names, and refuses it unless its sha256
-// matches the entry's digest and its front matter parses as YAML with a string
-// `name` (the index's) and `description`. Needs no sign-in. Makes exactly
-// these two requests, both to the site, and follows no redirect: no telemetry,
-// no other host. Each request has a deadline and a size cap. Writes `./.claude/skills/<name>/SKILL.md` (`-g`: under the
-// home folder; `--agents`: `.agents/skills` too), never replaces a different
-// file of the same name without `--force`, and writes nothing on a refusal.
+// then fetches what the entry names: a SKILL.md (`type: skill-md`) or a
+// tar.gz of the skill's folder (`type: archive`). It refuses the download
+// unless its sha256 matches the entry's digest, and refuses an archive that
+// our own reader (src/tar-gz.ts) does not pass. Either way the SKILL.md must
+// have YAML front matter with a string `name` (the index's) and
+// `description`. Needs no sign-in. Makes exactly these two requests, both to
+// the site, and follows no redirect: no telemetry, no other host. Each
+// request has a deadline and a size cap. Writes `./.claude/skills/<name>/`
+// (`-g`: under the home folder; `--agents`: `.agents/skills` too), never
+// replaces a different skill of the same name without `--force`, and writes
+// nothing on a refusal.
 
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -18,6 +22,8 @@ import { dirname, join } from 'node:path'
 import { parseDocument } from 'yaml'
 import { str, type Ctx } from '../context'
 import { CliError, EXIT, exitForHttp, usageError } from '../errors'
+import { ArchiveError, readSkillArchive, type SkillArchive } from '../tar-gz'
+import { skillDirs, writeSkillFolder, type FilePlan } from './skills-folder'
 
 /** Where the skills library is published. */
 export const DEFAULT_SKILLS_SITE = 'https://amdahl.ai'
@@ -37,6 +43,9 @@ export const MAX_INDEX_BYTES = 256 * 1024
 /** The most it reads of a SKILL.md: amdahl.ai refuses a bigger one (its SKILL_MAX_BYTES). */
 export const MAX_SKILL_BYTES = 64 * 1024
 
+/** The most it downloads of a folder skill's archive (4 MB). */
+export const MAX_ARCHIVE_BYTES = 4 * 1024 * 1024
+
 const DIGEST_RE = /^sha256:([0-9a-f]{64})$/i
 const FRONT_MATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/
 const USAGE = 'Usage: amdahl skills add <publisher>/<skill> [-g] [--agents] [--force] [--site <origin>]'
@@ -45,12 +54,6 @@ const USAGE = 'Usage: amdahl skills add <publisher>/<skill> [-g] [--agents] [--f
 export interface SkillRef {
   publisher: string
   skill: string
-}
-
-/** What `skills add` did to one file. */
-interface FilePlan {
-  path: string
-  action: 'wrote' | 'replaced' | 'unchanged'
 }
 
 /**
@@ -121,8 +124,9 @@ async function get(ctx: Ctx, url: string, what: string, site: string, maxBytes: 
     const cause = err instanceof Error && err.cause instanceof Error ? ` (${err.cause.message})` : ''
     return new CliError('network_error', `Could not reach ${site}: ${err instanceof Error ? err.message : String(err)}${cause}`, EXIT.network)
   }
+  const limit = maxBytes >= 1024 * 1024 ? `${maxBytes / 1024 / 1024} MB` : `${maxBytes / 1024} KB`
   const tooLarge = () =>
-    new CliError('too_large', `${url} is over ${maxBytes / 1024} KB, the most skills add reads for a ${what}.`, EXIT.general, 'Nothing was written.')
+    new CliError('too_large', `${url} is over ${limit}, the most skills add reads for a ${what}.`, EXIT.general, 'Nothing was written.')
 
   let res: Response
   try {
@@ -162,11 +166,18 @@ async function get(ctx: Ctx, url: string, what: string, site: string, maxBytes: 
   return Buffer.concat(chunks)
 }
 
+/** A skill's entry in its index: what to download, from where, and the sha256 hex it must match. */
+export interface IndexEntry {
+  type: 'skill-md' | 'archive'
+  url: string
+  sha256: string
+}
+
 /**
- * Find the skill's entry in its index and return the file URL (on the site)
- * and the sha256 hex the file must match.
+ * Find the skill's entry in its index and return its type, the URL of its
+ * SKILL.md or archive (on the site) and the sha256 hex the download must match.
  */
-export function readIndex(body: Buffer, indexUrl: string, ref: SkillRef, site: string): { url: string; sha256: string } {
+export function readIndex(body: Buffer, indexUrl: string, ref: SkillRef, site: string): IndexEntry {
   const bad = (why: string) => new CliError('invalid_index', `The index at ${indexUrl} ${why}.`, EXIT.general)
   let index: unknown
   try {
@@ -180,7 +191,8 @@ export function readIndex(body: Buffer, indexUrl: string, ref: SkillRef, site: s
     | Record<string, unknown>
     | undefined
   if (!entry) throw bad(`does not list ${ref.skill}`)
-  if (entry.type !== 'skill-md') throw bad(`lists ${ref.skill} as a type other than skill-md`)
+  const type = entry.type
+  if (type !== 'skill-md' && type !== 'archive') throw bad(`lists ${ref.skill} as a type other than skill-md or archive`)
   const digest = typeof entry.digest === 'string' ? DIGEST_RE.exec(entry.digest) : null
   if (!digest?.[1]) throw bad(`gives ${ref.skill} no sha256 digest`)
   let url: URL | null = null
@@ -191,15 +203,11 @@ export function readIndex(body: Buffer, indexUrl: string, ref: SkillRef, site: s
   }
   if (!url) throw bad(`gives ${ref.skill} no file URL`)
   if (url.origin !== site) throw bad(`points ${ref.skill} at ${url.origin}, not ${site}`)
-  return { url: url.href, sha256: digest[1].toLowerCase() }
+  return { type, url: url.href, sha256: digest[1].toLowerCase() }
 }
 
-/**
- * Refuse the downloaded file unless it is exactly what the index promised
- * and a SKILL.md for `ref.skill`: UTF-8, YAML front matter, a string `name`
- * equal to the index's and a non-empty string `description`.
- */
-export function checkSkill(body: Buffer, fileUrl: string, sha256: string, ref: SkillRef): void {
+/** Refuse downloaded bytes whose sha256 differs from the index digest. */
+export function checkDigest(body: Buffer, fileUrl: string, sha256: string): void {
   const actual = createHash('sha256').update(body).digest('hex')
   if (actual !== sha256) {
     throw new CliError(
@@ -209,7 +217,15 @@ export function checkSkill(body: Buffer, fileUrl: string, sha256: string, ref: S
       'Nothing was written. Try again; if it repeats, report it.'
     )
   }
-  const bad = (why: string) => new CliError('invalid_skill', `${fileUrl} is not a valid skill: ${why}.`, EXIT.general)
+}
+
+/**
+ * Refuse a SKILL.md that is not one for `ref.skill`: UTF-8, YAML front
+ * matter, a string `name` equal to the index's and a non-empty string
+ * `description`. `what` names the file in the message.
+ */
+export function checkSkillMd(body: Buffer, what: string, ref: SkillRef): void {
+  const bad = (why: string) => new CliError('invalid_skill', `${what} is not a valid skill: ${why}.`, EXIT.general)
   let text: string
   try {
     text = new TextDecoder('utf-8', { fatal: true }).decode(body)
@@ -237,12 +253,28 @@ export function checkSkill(body: Buffer, fileUrl: string, sha256: string, ref: S
   if (name !== ref.skill) throw bad(`its front matter names it "${name}", but the index lists ${ref.skill}`)
 }
 
-/** Every file `skills add` writes for this skill. */
+/**
+ * Unpack a folder skill's archive with our own reader and check its SKILL.md.
+ * Call only after checkDigest: the bytes are then the ones the index promised.
+ */
+export function readArchive(body: Buffer, url: string, ref: SkillRef): SkillArchive {
+  let archive: SkillArchive
+  try {
+    archive = readSkillArchive(body)
+  } catch (err) {
+    if (!(err instanceof ArchiveError)) throw err
+    if (err.tooLarge) throw new CliError('too_large', `${url} is too large: ${err.message}.`, EXIT.general, 'Nothing was written.')
+    throw new CliError('invalid_archive', `${url} is not a safe skill archive: ${err.message}.`, EXIT.general, 'Nothing was written.')
+  }
+  const skillMd = archive.files.find((f) => f.path === 'SKILL.md')
+  if (!skillMd) throw new CliError('invalid_skill', `${url} is not a valid skill: it has no SKILL.md at its root.`, EXIT.general)
+  checkSkillMd(skillMd.bytes, `The SKILL.md in ${url}`, ref)
+  return archive
+}
+
+/** Every file `skills add` writes for a SKILL.md-only skill. */
 function targetPaths(ctx: Ctx, name: string): string[] {
-  const base = ctx.flags.global === true ? ctx.io.homedir : ctx.io.cwd
-  const dirs = [join(base, '.claude', 'skills')]
-  if (ctx.flags.agents === true) dirs.push(join(base, '.agents', 'skills'))
-  return dirs.map((dir) => join(dir, name, 'SKILL.md'))
+  return skillDirs(ctx, name).map((dir) => join(dir, 'SKILL.md'))
 }
 
 /** Compare each target with the new bytes, then write the ones that differ. */
@@ -292,14 +324,28 @@ export async function skillsAdd(ctx: Ctx, args: string[]): Promise<number> {
   const ref = parseSkillRef(args[0], site)
 
   const indexUrl = `${site}/skills/${ref.publisher}/${ref.skill}/.well-known/agent-skills/index.json`
-  const { url, sha256 } = readIndex(await get(ctx, indexUrl, 'skill index', site, MAX_INDEX_BYTES), indexUrl, ref, site)
-  const body = await get(ctx, url, 'SKILL.md', site, MAX_SKILL_BYTES)
-  checkSkill(body, url, sha256, ref)
+  const { type, url, sha256 } = readIndex(await get(ctx, indexUrl, 'skill index', site, MAX_INDEX_BYTES), indexUrl, ref, site)
+  const line = (f: FilePlan, count = '') =>
+    f.action === 'unchanged' ? `Already up to date: ${f.path}` : `${f.action === 'wrote' ? 'Wrote' : 'Replaced'} ${f.path}${count}`
+  const result = { ok: true, publisher: ref.publisher, skill: ref.skill, url, digest: `sha256:${sha256}` }
 
+  if (type === 'archive') {
+    const body = await get(ctx, url, 'skill archive', site, MAX_ARCHIVE_BYTES)
+    checkDigest(body, url, sha256)
+    const archive = readArchive(body, url, ref)
+    const files = writeSkillFolder(ctx, ref.skill, archive)
+    const contents = archive.files.map((f) => f.path)
+    const count = ` (${contents.length} file${contents.length === 1 ? '' : 's'})`
+    const lines = files.map((f) => line(f, count))
+    if (files.some((f) => f.action !== 'unchanged')) lines.push(...contents.map((p) => `  ${p}`))
+    ctx.out.result({ ...result, files, contents }, lines.join('\n'))
+    return EXIT.ok
+  }
+
+  const body = await get(ctx, url, 'SKILL.md', site, MAX_SKILL_BYTES)
+  checkDigest(body, url, sha256)
+  checkSkillMd(body, url, ref)
   const files = writeSkill(ctx, ref.skill, body)
-  const human = files
-    .map((f) => (f.action === 'unchanged' ? `Already up to date: ${f.path}` : `${f.action === 'wrote' ? 'Wrote' : 'Replaced'} ${f.path}`))
-    .join('\n')
-  ctx.out.result({ ok: true, publisher: ref.publisher, skill: ref.skill, url, digest: `sha256:${sha256}`, files }, human)
+  ctx.out.result({ ...result, files }, files.map((f) => line(f)).join('\n'))
   return EXIT.ok
 }
