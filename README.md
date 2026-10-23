@@ -122,22 +122,31 @@ npx amdahl skills add <publisher>/<skill>
 npx amdahl skills add https://amdahl.ai/skills/<publisher>/<skill>
 ```
 
-In a terminal, it takes one keypress. It prints `Checking <publisher>/<skill>
-on amdahl.ai... OK` while it downloads and checks the skill. Then it says what
-the skill is and where it will go, before it writes anything:
+In a terminal, it asks one question. It prints `Checking <publisher>/<skill>
+on amdahl.ai... OK` while it downloads and checks the skill. Then it names
+the skill and the agents it sees in use, and asks where to install it:
 
-- **Where:** this project.
-- **Which agents:** the ones it sees in use. A `.claude` folder here or in your
-  home folder, or `CLAUDECODE` set, means Claude Code (`.claude/skills`). An
-  `.agents`, `.codex` or `.cursor` folder means Codex, Cursor and other agents
-  (`.agents/skills`). When it sees both kinds, or neither, it uses both.
+```
+System diagram, by Amdahl (17 files), for Claude Code and Cursor.
+Install it in:
+  1. This project (~/proj)
+  2. Every project on this computer
+Press Enter for 1, or type 2:
+```
 
-Press Enter to add it. Type `c` to change where: this project or every
-project (not asked in your home folder), then which agents. Ctrl+C stops it
-with nothing written (exit 130). If a different copy of the skill is already
-there, Enter keeps yours and `y` replaces it; with `--force` it replaces it
-without asking. If the skill is already up to date, it asks nothing. It ends
-with the folders it wrote and what to do next.
+The answer is the go-ahead: it installs, prints the folders it wrote, and
+says to open a new chat. In your home folder it does not ask, and installs
+for every project. Ctrl+C stops it with nothing written (exit 130).
+
+It never asks about agents. A `.claude` folder here or in your home folder,
+or `CLAUDECODE` set, means Claude Code (`.claude/skills`). A `.codex` folder
+means Codex, a `.cursor` folder or `CURSOR_AGENT` means Cursor, and an
+`.agents` folder means other agents (all `.agents/skills`). When it sees
+both kinds, or neither, it writes both folders. To choose yourself, use the
+flags below.
+
+If a different copy of the skill is already there, it asks once more: Enter
+keeps yours, `y` replaces it. With `--force` it replaces it without asking.
 
 It never asks when stdin or stdout is not a terminal (an agent, CI, a pipe),
 or with `--json`, `-y`, `-g` or `--agents`, or with `AMDAHL_NO_PROMPT=1`.

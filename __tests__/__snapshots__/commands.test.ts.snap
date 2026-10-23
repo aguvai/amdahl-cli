@@ -27,7 +27,7 @@ Commands:
   workspace list | workspace use <profile>
   install claude-code|codex|cursor [--print] [--force]
   skills add <publisher>/<skill> [-y] [-g] [--agents] [--force] [--site <origin>]
-           In a terminal it shows where the skill goes; Enter adds it there.
+           In a terminal it asks one question: this project (Enter) or every project.
            -y        add without asking, to this project
            -g        every project (~/.claude/skills), not just this one
            --agents  also .agents/skills, for Codex, Cursor and other agents

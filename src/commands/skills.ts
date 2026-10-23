@@ -21,7 +21,7 @@ import { parseDocument } from 'yaml'
 import { str, type Ctx } from '../context'
 import { CliError, EXIT, exitForHttp, usageError } from '../errors'
 import { ArchiveError, readSkillArchive, type SkillArchive } from '../tar-gz'
-import { guide, nextStep, runningAgent, shouldGuide, shownPath, type SkillSummary } from './skills-guide'
+import { agentsInUse, guide, nextStep, runningAgent, shouldGuide, skillsFolders, type SkillSummary } from './skills-guide'
 import { planInstall, refuseClashes, skillDirs, writeInstall, type FilePlan, type Payload, type Targets } from './skills-install'
 
 /** Where the skills library is published. */
@@ -337,15 +337,12 @@ export async function skillsAdd(ctx: Ctx, args: string[]): Promise<number> {
 
   const agent = runningAgent(ctx)
   let targets: Targets
+  let seen: string[] = []
   let plan: FilePlan[]
   if (guided) {
-    const summary: SkillSummary = {
-      name: ref.skill,
-      publisher: ref.publisher,
-      description: entry.description || meta.description,
-      version: entry.version ?? meta.version,
-      host: new URL(site).host,
-    }
+    const summary: SkillSummary = { name: ref.skill, publisher: ref.publisher, version: entry.version ?? meta.version }
+    // The agents in use, read now: the install itself creates the folders they are detected by.
+    seen = agentsInUse(ctx).names
     const settled = await guide(ctx, summary, payload)
     targets = settled.targets
     plan = settled.plan
@@ -372,14 +369,11 @@ export async function skillsAdd(ctx: Ctx, args: string[]): Promise<number> {
   if (contents && plan.some((f) => f.action !== 'unchanged')) lines.push(...contents.map((p) => `  ${p}`))
   const result = { ok: true, publisher: ref.publisher, skill: ref.skill, url, digest: `sha256:${sha256}`, files: plan }
   if (guided) {
-    // A person gets the folders in the short form they would type; the file list is for scripts.
+    // A person gets the skills folders in the short form they would type; the file list is for scripts.
     const changed = plan.filter((f) => f.action !== 'unchanged')
-    const short =
-      changed.length > 0
-        ? [`Done. Added ${ref.skill}${count} to:`, ...changed.map((f) => `  ${shownPath(ctx, f.path)}`)]
-        : plan.map((f) => `Already up to date: ${shownPath(ctx, f.path)}`)
-    ctx.out.result(result, short.join('\n'))
-    ctx.out.info(`\n${nextStep(ctx, targets)}`)
+    const done = changed.length > 0 ? `Done. Added to ${skillsFolders(ctx, changed)}.` : `Already up to date in ${skillsFolders(ctx, plan)}.`
+    ctx.out.result(result, `\n${done}`)
+    ctx.out.info(nextStep(ctx, targets, seen))
     return EXIT.ok
   }
   ctx.out.result(contents ? { ...result, contents } : result, lines.join('\n'))
