@@ -38,9 +38,9 @@ const MAX_TAR_BYTES = MAX_UNPACKED_BYTES + 1024 * 1024
 
 const BLOCK = 512
 const FILE_MODES = new Set([0o644, 0o755])
-// Every C0 control character and DEL.
+// Every C0 control character, DEL and every C1 control character.
 // eslint-disable-next-line no-control-regex
-const CONTROL_RE = /[\u0000-\u001f\u007f]/
+const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]/
 
 /** One file in the archive. */
 export interface ArchiveFile {

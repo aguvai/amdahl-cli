@@ -7,6 +7,19 @@
 
 import type { Io } from './io'
 
+// Every C0 control character (ESC among them), DEL and every C1 control character.
+// eslint-disable-next-line no-control-regex
+const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]/g
+
+/**
+ * `text` with every control character removed, newlines too: for a string
+ * from the network (a skill's version or name, or an archive path), so it cannot
+ * move the cursor, retitle the window or clear the screen when printed.
+ */
+export function printable(text: string): string {
+  return text.replace(CONTROL_RE, '')
+}
+
 /** Writers bound to one invocation's flags. */
 export interface Output {
   /** True under `--json`. */

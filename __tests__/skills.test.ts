@@ -258,6 +258,15 @@ describe('skills add', () => {
     })
   })
 
+  it('prints a front matter name without its escape codes', async () => {
+    // \e]0;...\a retitles the window and \e[2J clears the screen, if they reach the terminal.
+    serveSkill(SKILL.replace('name: call-prep', 'name: "\\e]0;pwned\\a\\e[2Jcall-prep\\u009b2J"'))
+    const io = fakeIo()
+    const r = await cli(io, 'skills', 'add', 'amdahl/call-prep')
+    expect(r.code).toBe(1)
+    expect(r.stderr).toBe(`Error: ${FILE} is not a valid skill: its front matter names it "]0;pwned[2Jcall-prep2J", but the index lists call-prep.\n`)
+  })
+
   it('checks every target before it writes any', async () => {
     serveSkill()
     const io = fakeIo()

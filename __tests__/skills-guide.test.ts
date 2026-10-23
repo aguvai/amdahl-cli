@@ -4,7 +4,7 @@
 // and an agent that ran it gets its own folder when it says who it is.
 
 import { createHash } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cli, fakeIo, type FakeIo } from './helpers/fake-io'
@@ -167,6 +167,23 @@ describe('skills add, guided', () => {
     expect(io.err.join('')).toContain(`System diagram, by Amdahl ${shown}, for Claude Code.\n`)
   })
 
+  it('shows a version without its escape codes, from the index or the front matter', async () => {
+    const CONTROL = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/
+    serve({ version: '\u001b]0;pwned\u0007\u001b[2J1.0\u009b2J' })
+    const io = terminal([], { CLAUDECODE: '1' })
+    await add(io)
+    expect(io.err.join('')).toContain('System diagram, by Amdahl (v]0;pwned[2J1.02J, 3 files), for Claude Code.\n')
+    expect(io.err.join('')).not.toMatch(CONTROL)
+
+    const own = skillTarGz({ 'SKILL.md': SKILL.replace('---\n', '---\nversion: "\\e[2J3"\n'), 'build.py': 'print(1)\n' })
+    const index = JSON.stringify({ skills: [{ name: 'system-diagram', type: 'archive', url: ARCHIVE, digest: `sha256:${createHash('sha256').update(own).digest('hex')}` }] })
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => (input === INDEX ? new Response(index) : new Response(own))))
+    const again = terminal([], { CLAUDECODE: '1' })
+    await add(again)
+    expect(again.err.join('')).toContain('System diagram, by Amdahl (v[2J3, 2 files), for Claude Code.\n')
+    expect(again.err.join('')).not.toMatch(CONTROL)
+  })
+
   it.each<[string, (string | null)[], boolean]>([
     ['the where question', [null], false],
     ['the replace question', ['', null], true],
@@ -202,6 +219,30 @@ describe('skills add, guided', () => {
     expect(io.prompts).toEqual([WHERE(io), KEEP])
     expect(replaced.stdout).toBe('\nDone. Added to ./.claude/skills.\n')
     expect(readFileSync(join(claudeDir(io.cwd), 'SKILL.md'), 'utf8')).toBe(SKILL)
+  })
+
+  it('checks for a link again when it writes: one planted while the question is open is refused', async () => {
+    serve()
+    const io = terminal(['', '2'], { CLAUDECODE: '1' })
+    ownCopy(io)
+    const outside = join(io.homedir, 'outside')
+    const skills = join(io.cwd, '.claude', 'skills')
+    const select = io.select
+    io.select = async (question, choices, options) => {
+      if (question.startsWith('Keep')) {
+        // Swap the skills folder for a link to a copy outside the project.
+        renameSync(skills, outside)
+        symlinkSync(outside, skills)
+      }
+      return select(question, choices, options)
+    }
+    const r = await add(io)
+    expect(io.prompts).toEqual([WHERE(io), KEEP])
+    expect(r.code).toBe(1)
+    expect(r.stderr).toContain(`Error: Could not write ${claudeDir(io.cwd)}: ${skills} is a link.`)
+    expect(readdirSync(outside)).toEqual(['system-diagram'])
+    expect(readFileSync(join(outside, 'system-diagram', 'SKILL.md'), 'utf8')).toBe('mine\n')
+    expect(lstatSync(skills).isSymbolicLink()).toBe(true)
   })
 
   it('--force at a terminal replaces a different copy without the replace question', async () => {

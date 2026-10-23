@@ -11,7 +11,8 @@
 // step removes the temp folders, puts back any folder it had moved aside,
 // and removes the parent folders it created: nothing is left. A SKILL.md-only
 // skill writes the one file in each target, through a temp file renamed over
-// it, and refuses a target with a link anywhere under the install root.
+// it. Either kind refuses a target with a link anywhere under the install
+// root, even with --force.
 
 import { randomBytes } from 'node:crypto'
 import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
@@ -110,14 +111,15 @@ export function sameFolder(dir: string, archive: SkillArchive): boolean | null {
 }
 
 /**
- * Refuse a SKILL.md path that goes through a link, or that is not a plain
- * file: the write would land wherever the link points, outside the install
- * root. Checks each part under the root that `skillDirs` builds (`.claude` or
- * `.agents`, `skills`, the skill folder) and the file itself.
+ * Refuse a skill folder, or its SKILL.md, reached through a link, or a
+ * SKILL.md that is not a plain file: the write would land wherever the link
+ * points, outside the install root. Checks each part under the root that
+ * `skillDirs` builds (`.claude` or `.agents`, `skills`, the skill folder) and,
+ * when given, the file itself. `--force` does not override it.
  */
-function refuseLinks(path: string, written: string[] = []): void {
-  const dir = dirname(path)
-  for (const part of [dirname(dirname(dir)), dirname(dir), dir, path]) {
+function refuseLinks(dir: string, file?: string, written: string[] = []): void {
+  const path = file ?? dir
+  for (const part of [dirname(dirname(dir)), dirname(dir), dir, ...(file ? [file] : [])]) {
     let stat
     try {
       stat = lstatSync(part)
@@ -125,7 +127,7 @@ function refuseLinks(path: string, written: string[] = []): void {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return
       throw writeFailure(path, err, written)
     }
-    const why = stat.isSymbolicLink() ? 'is a link' : part === path && !stat.isFile() ? 'is not a file' : ''
+    const why = stat.isSymbolicLink() ? 'is a link' : part === file && !stat.isFile() ? 'is not a file' : ''
     if (why) {
       throw new CliError(
         'link_in_the_way',
@@ -141,11 +143,12 @@ function refuseLinks(path: string, written: string[] = []): void {
 export function planInstall(dirs: string[], payload: Payload): FilePlan[] {
   return dirs.map((dir) => {
     if (payload.type === 'archive') {
+      refuseLinks(dir)
       const same = sameFolder(dir, payload.archive)
       return { path: dir, action: same === null ? 'wrote' : same ? 'unchanged' : 'replaced' }
     }
     const path = join(dir, 'SKILL.md')
-    refuseLinks(path)
+    refuseLinks(dir, path)
     let current: Buffer | null
     try {
       current = lstatSync(path, { throwIfNoEntry: false }) ? readFileSync(path) : null
@@ -184,7 +187,11 @@ interface Staged {
 function stage(target: string, name: string, archive: SkillArchive, staged: Staged[]): void {
   const s: Staged = { target, temp: '' }
   staged.push(s)
+  // Again: in the guided flow, time has passed since the plan. And once more
+  // after mkdir, which follows a link it finds on the way.
+  refuseLinks(target)
   s.createdParent = mkdirSync(dirname(target), { recursive: true }) ?? undefined
+  refuseLinks(target)
   s.temp = mkdtempSync(join(dirname(target), `.${name}.amdahl-tmp-`))
   // mkdtemp makes it 0700; the skill folder is 0755, like every folder in the archive.
   chmodSync(s.temp, 0o755)
@@ -231,6 +238,7 @@ function writeFolders(plan: FilePlan[], name: string, archive: SkillArchive): vo
     }
   } catch (err) {
     rollBack(staged)
+    if (err instanceof CliError) throw err
     throw writeFailure(current, err)
   }
   for (const s of staged) if (s.backup) rmSync(s.backup, { recursive: true, force: true })
@@ -246,11 +254,11 @@ function writeFiles(plan: FilePlan[], body: Buffer): void {
   for (const p of plan) {
     if (p.action === 'unchanged') continue
     // Again: in the guided flow, time has passed since the plan.
-    refuseLinks(p.path, written)
+    refuseLinks(dirname(p.path), p.path, written)
     const temp = join(dirname(p.path), `.SKILL.md.amdahl-tmp-${randomBytes(6).toString('hex')}`)
     try {
       mkdirSync(dirname(p.path), { recursive: true })
-      refuseLinks(p.path, written)
+      refuseLinks(dirname(p.path), p.path, written)
       writeFileSync(temp, body, { flag: 'wx', mode: 0o644 })
       renameSync(temp, p.path)
     } catch (err) {

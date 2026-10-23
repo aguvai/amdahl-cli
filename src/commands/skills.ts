@@ -21,6 +21,7 @@ import { createHash } from 'node:crypto'
 import { parseDocument } from 'yaml'
 import { str, type Ctx } from '../context'
 import { CliError, EXIT, exitForHttp, usageError } from '../errors'
+import { printable } from '../output'
 import { ArchiveError, readSkillArchive, type SkillArchive } from '../tar-gz'
 import { agentsInUse, guide, nextStep, runningAgent, shouldGuide, skillsFolders, type SkillSummary } from './skills-guide'
 import { planInstall, refuseClashes, skillDirs, writeInstall, type FilePlan, type Payload, type Targets } from './skills-install'
@@ -204,12 +205,13 @@ export function readIndex(body: Buffer, indexUrl: string, ref: SkillRef, site: s
   }
   if (!url) throw bad(`gives ${ref.skill} no file URL`)
   if (url.origin !== site) throw bad(`points ${ref.skill} at ${url.origin}, not ${site}`)
+  const version = typeof entry.version === 'string' ? printable(entry.version) : ''
   return {
     type,
     url: url.href,
     sha256: digest[1].toLowerCase(),
     description: typeof entry.description === 'string' ? entry.description : '',
-    ...(typeof entry.version === 'string' && entry.version ? { version: entry.version } : {}),
+    ...(version ? { version } : {}),
   }
 }
 
@@ -247,20 +249,20 @@ export function checkSkillMd(body: Buffer, what: string, ref: SkillRef): { descr
   if (yamlError) {
     // +1 for the opening `---` line, so the number is the file's own line.
     const line = yamlError.linePos ? `line ${yamlError.linePos[0].line + 1}: ` : ''
-    throw bad(`its front matter is not valid YAML (${line}${yamlError.message.split(' at line')[0]})`)
+    throw bad(`its front matter is not valid YAML (${line}${printable(yamlError.message.split(' at line')[0] ?? '')})`)
   }
   let meta: unknown
   try {
     meta = doc.toJS()
   } catch (err) {
-    throw bad(`its front matter could not be read (${err instanceof Error ? err.message : String(err)})`)
+    throw bad(`its front matter could not be read (${printable(err instanceof Error ? err.message : String(err))})`)
   }
   const { name, description, version, metadata } = (meta && typeof meta === 'object' && !Array.isArray(meta) ? meta : {}) as Record<string, unknown>
   if (typeof name !== 'string') throw bad('its front matter has no string name')
   if (typeof description !== 'string' || description.trim() === '') throw bad('its front matter has no string description')
-  if (name !== ref.skill) throw bad(`its front matter names it "${name}", but the index lists ${ref.skill}`)
+  if (name !== ref.skill) throw bad(`its front matter names it "${printable(name)}", but the index lists ${ref.skill}`)
   const nested = metadata && typeof metadata === 'object' ? (metadata as Record<string, unknown>).version : undefined
-  const v = typeof version === 'string' ? version : typeof nested === 'string' ? nested : undefined
+  const v = printable(typeof version === 'string' ? version : typeof nested === 'string' ? nested : '')
   return { description, ...(v ? { version: v } : {}) }
 }
 
@@ -274,8 +276,10 @@ export function readArchive(body: Buffer, url: string, ref: SkillRef): { archive
     archive = readSkillArchive(body)
   } catch (err) {
     if (!(err instanceof ArchiveError)) throw err
-    if (err.tooLarge) throw new CliError('too_large', `${url} is too large: ${err.message}.`, EXIT.general, 'Nothing was written.')
-    throw new CliError('invalid_archive', `${url} is not a safe skill archive: ${err.message}.`, EXIT.general, 'Nothing was written.')
+    // Its message can quote a path from the archive.
+    const why = printable(err.message)
+    if (err.tooLarge) throw new CliError('too_large', `${url} is too large: ${why}.`, EXIT.general, 'Nothing was written.')
+    throw new CliError('invalid_archive', `${url} is not a safe skill archive: ${why}.`, EXIT.general, 'Nothing was written.')
   }
   const skillMd = archive.files.find((f) => f.path === 'SKILL.md')
   if (!skillMd) throw new CliError('invalid_skill', `${url} is not a valid skill: it has no SKILL.md at its root.`, EXIT.general)

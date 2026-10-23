@@ -4,7 +4,7 @@
 // download cap, and every archive the reader must refuse.
 
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { gunzipSync } from 'node:zlib'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -168,6 +168,37 @@ describe('skills add, folder skill', () => {
     expect((await cli(io, 'skills', 'add', 'amdahl/system-diagram', '--json')).json.error.code).toBe('skill_exists')
   })
 
+  describe('refuses to unpack through a link under the project, even with --force', () => {
+    /** A folder outside the project, next to it. */
+    const outside = (io: FakeIo) => {
+      const dir = join(io.homedir, 'outside')
+      mkdirSync(dir, { recursive: true })
+      return dir
+    }
+    const linkRefused = (io: FakeIo, part: string) => ({
+      code: 'link_in_the_way',
+      message: `Could not write ${projectDir(io)}: ${part} is a link.`,
+      hint: 'Nothing was written. Remove it, or install somewhere else.',
+    })
+
+    it.each<[string, (io: FakeIo) => string]>([
+      ['a linked .claude', (io) => join(io.cwd, '.claude')],
+      ['a linked skills folder', (io) => join(io.cwd, '.claude', 'skills')],
+      ['a linked skill folder', (io) => projectDir(io)],
+    ])('%s', async (_label, linked) => {
+      serve(skillTarGz(FILES))
+      const io = fakeIo()
+      const link = linked(io)
+      mkdirSync(join(link, '..'), { recursive: true })
+      symlinkSync(outside(io), link)
+      const r = await cli(io, 'skills', 'add', 'amdahl/system-diagram', '--force', '--json')
+      expect(r.code).toBe(1)
+      expect(r.json.error).toEqual(linkRefused(io, link))
+      expect(readdirSync(outside(io))).toEqual([])
+      expect(lstatSync(link).isSymbolicLink()).toBe(true)
+    })
+  })
+
   it('checks the digest before it reads the archive', async () => {
     // A hostile archive served in place of the promised one: the digest refuses it, not the reader.
     serve(gzip(rawTar([{ path: 'SKILL.md', type: '2', linkname: '/etc/passwd' }])), skillTarGz(FILES))
@@ -212,6 +243,9 @@ describe('skills add, folder skill', () => {
     ['an empty segment', gzip(rawTar([skill, { path: 'a//b', body: 'x' }])), 'it has a path with an empty segment, "a//b"'],
     ['a backslash', gzip(rawTar([skill, { path: 'a\\..\\x', body: 'x' }])), 'it has a path with a backslash, "a\\\\..\\\\x"'],
     ['a control character', gzip(rawTar([skill, { path: 'a\nb', body: 'x' }])), 'it has a path with a control character, "a\\nb"'],
+    // A C1 control: JSON.stringify leaves it as it is, so the message drops it.
+    ['a C1 control character', gzip(rawTar([skill, { path: 'a\u009b2Jb', body: 'x' }])), 'it has a path with a control character, "a2Jb"'],
+    ['a link named with a C1 control', gzip(rawTar([skill, { path: 'evil\u009b2J', type: '2', linkname: 'x' }])), '"evil2J" is a symbolic link; a skill archive holds only files and folders'],
     ['a symbolic link', gzip(rawTar([skill, { path: 'evil', type: '2', linkname: '/etc/passwd' }])), '"evil" is a symbolic link; a skill archive holds only files and folders'],
     ['a hard link', gzip(rawTar([skill, { path: 'evil', type: '1', linkname: 'SKILL.md' }])), '"evil" is a hard link; a skill archive holds only files and folders'],
     ['a device', gzip(rawTar([skill, { path: 'dev', type: '3' }])), '"dev" is a character device; a skill archive holds only files and folders'],
