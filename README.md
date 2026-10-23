@@ -51,6 +51,10 @@ npm i -g @amdahl/cli
 amdahl login
 ```
 
+`amdahl` is also on npm by its short name, so `npx amdahl ...` is the same as
+`npx @amdahl/cli ...`. That package ([packages/amdahl](packages/amdahl)) has no
+code of its own: it depends on `@amdahl/cli` at the same version and runs it.
+
 To connect an AI client, run `amdahl install claude-code` (or `codex`,
 `cursor`). It adds the Amdahl MCP server and also installs the Amdahl skill,
 a map of everything Amdahl can do, so your agent knows which tool fits each
@@ -112,9 +116,9 @@ Global flags: `--profile`, `--api-url`, `--api-key`, `--json`, `--no-color`,
 It needs no sign-in.
 
 ```sh
-npx @amdahl/cli skills add <publisher>/<skill>
+npx amdahl skills add <publisher>/<skill>
 # the skill's link works too, with or without .md:
-npx @amdahl/cli skills add https://amdahl.ai/skills/<publisher>/<skill>
+npx amdahl skills add https://amdahl.ai/skills/<publisher>/<skill>
 ```
 
 It reads the skill's index,
@@ -231,7 +235,7 @@ pnpm install
 pnpm build         # dist/amdahl.js, one file, no runtime deps
 pnpm test          # vitest, against a local mock server
 pnpm type-check
-pnpm smoke:pack    # pack, install offline, run --version
+pnpm smoke:pack    # pack both packages, install offline, run --help and --version
 pnpm sync:skill    # refresh skill/SKILL.md from docs.amdahl.ai (and skill/shipped.json), then commit both
 ```
 
@@ -242,9 +246,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues as described in
 
 `.github/workflows/publish.yml` publishes to npm. To release:
 
-1. In a PR, bump the version in `package.json` and `src/version.ts` together.
-   The workflow refuses a version that does not match both, or one that is
-   already on npm.
+1. In a PR, bump the version in `package.json` and `src/version.ts` together,
+   and in `packages/amdahl/package.json` both its `version` and its
+   `@amdahl/cli` dependency. The workflow refuses a version that does not
+   match the first two, or one that is already on npm; a test checks the third.
 2. After it merges, push a tag `cli-v<version>` (for example `cli-v0.2.0`). A
    version with a `-` (for example `0.2.0-rc.1`) goes to the `next` dist-tag;
    anything else goes to `latest`.
@@ -260,3 +265,19 @@ the `npm` environment, so no long-lived npm token is needed. Every release
 carries a signed [provenance attestation](https://docs.npmjs.com/generating-provenance-statements)
 that links the package on npm to the commit and workflow run that built it.
 Check it with `npm audit signatures` or on the package page on npmjs.com.
+
+The workflow publishes `amdahl` (the short name) right after `@amdahl/cli`,
+from the same run, only when the repository variable `NPM_PUBLISH_AMDAHL` is
+`true`. Trusted publishing can be set up for a package only after it exists,
+so the first version of `amdahl` is published by hand, once:
+
+1. Publish `@amdahl/cli` at that version with the tag, as above.
+2. From that run, download the `tarball` artifact. It holds
+   `amdahl-<version>.tgz`, already checked by the run.
+3. As an npm user who is an owner of the `amdahl` org, with 2FA:
+   `npm publish amdahl-<version>.tgz --access public`.
+4. Give the org's team write access: `npm access grant read-write amdahl:<team> amdahl`.
+5. On npmjs.com, `amdahl`, Settings, add a trusted publisher: GitHub Actions,
+   `amdahlco/amdahl-cli`, workflow `publish.yml`, environment `npm`.
+6. Set the repository variable `NPM_PUBLISH_AMDAHL` to `true`. From then on,
+   each `cli-v<version>` tag publishes both packages.
