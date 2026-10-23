@@ -5,13 +5,13 @@
 // terminal and no flag already says where the skill goes (-g, --agents, -y);
 // an agent, CI or a pipe never gets a question.
 //
-// It says what is about to happen and what was downloaded (nothing is
-// written yet), asks only what it cannot work out, with the right answer
-// already chosen so Enter is always correct, and ends with what to do next.
-// The questions: this project or every project (skipped when the two are the
-// same folder); which agents (skipped when only Claude Code, or only the
-// others, are in use); replace a different copy already there (Enter keeps
-// it). Ctrl+C at any question stops with nothing written.
+// One keypress on the main path. It says what the skill is and where it will
+// go (this project, for the agents it sees in use, or both when it sees none
+// or both), then asks once: Enter adds it, `c` changes where (this project or
+// every project, then which agents), Ctrl+C stops with nothing written. When
+// a different copy is already there, Enter keeps it and `y` replaces it;
+// `--force` replaces it without asking. When it is already up to date,
+// nothing is asked.
 
 import { existsSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
@@ -27,7 +27,6 @@ export interface SkillSummary {
   description: string
   /** From the index entry or the SKILL.md front matter, when either gives one. */
   version?: string
-  sha256: string
   /** The site's host, for example amdahl.ai. */
   host: string
 }
@@ -67,6 +66,17 @@ export function agentsInUse(ctx: Ctx): { claude: boolean; others: boolean } {
   }
 }
 
+/**
+ * The agent that is running this command, from what it documents setting in
+ * the shell it runs commands in: Claude Code sets CLAUDECODE, Cursor sets
+ * CURSOR_AGENT. Codex documents no such variable, so it is never named here.
+ */
+export function runningAgent(ctx: Ctx): 'claude' | 'cursor' | null {
+  if (ctx.io.env.CLAUDECODE) return 'claude'
+  if (ctx.io.env.CURSOR_AGENT) return 'cursor'
+  return null
+}
+
 /** Who reads a skill folder, in words. */
 export function agentLabel(targets: Pick<Targets, 'claude' | 'agents'>): string {
   if (targets.claude && targets.agents) return 'Claude Code, Codex, Cursor and other agents'
@@ -100,6 +110,17 @@ async function choose(ctx: Ctx, question: string, options: { label: string; deta
   }
 }
 
+/** Ask until the answer is one of `allowed` ('' is Enter). `n` or `no` stops, as Ctrl+C does. */
+async function key(ctx: Ctx, question: string, allowed: string[]): Promise<string> {
+  for (;;) {
+    const answer = (await ctx.io.prompt(question)).trim().toLowerCase()
+    if (answer === 'n' || answer === 'no') throw new PromptCancelled()
+    if (allowed.includes(answer)) return answer
+    if (answer === 'yes' && allowed.includes('y')) return 'y'
+    ctx.out.info(`Press Enter, or type ${allowed.filter(Boolean).join(' or ')}.`)
+  }
+}
+
 /**
  * Walk a person through where the skill goes, then return the plan to write.
  * Writes nothing. Ctrl+C at any question throws a `cancelled` CliError.
@@ -113,22 +134,17 @@ export async function guide(ctx: Ctx, skill: SkillSummary, payload: Payload): Pr
   }
 }
 
-async function ask(ctx: Ctx, skill: SkillSummary, payload: Payload): Promise<GuideResult> {
-  const { io, out } = ctx
-  const files = payload.type === 'archive' ? payload.archive.files.map((f) => f.bytes.length) : [payload.body.length]
-  const count = `${files.length} file${files.length === 1 ? '' : 's'}, ${size(files.reduce((a, b) => a + b, 0))}`
-  const facts = [
-    `This adds the ${skill.name} skill from ${skill.host} to a folder your AI agent reads.`,
-    'Nothing is written until you say so.',
-    '',
-    `  Skill:     ${skill.name}, by ${skill.publisher}${skill.version ? `, version ${skill.version}` : ''}`,
-  ]
-  const what = firstClause(skill.description)
-  if (what) facts.push(`  Does:      ${what}`)
-  facts.push(`  Files:     ${count}`, `  Checksum:  sha256 ${skill.sha256.slice(0, 12)}, matches ${skill.host}`)
-  // Ends with a blank line before the first question.
-  out.info(`${facts.join('\n')}\n\n`)
+/** The places it goes without a question: this project, for the agents in use, or both when it cannot tell. */
+function defaultTargets(ctx: Ctx): Targets {
+  const used = agentsInUse(ctx)
+  const both = used.claude === used.others
+  return { base: ctx.io.cwd, claude: both || used.claude, agents: both || used.others }
+}
 
+/** The two questions behind `c`: this project or every project, then which agents. */
+async function changeWhere(ctx: Ctx, current: Targets): Promise<Targets> {
+  const { io, out } = ctx
+  out.info('')
   let base = io.homedir
   if (io.cwd !== io.homedir) {
     const here = io.cwd.startsWith(io.homedir + sep) ? `~${io.cwd.slice(io.homedir.length).split(sep).join('/')}` : io.cwd
@@ -136,59 +152,81 @@ async function ask(ctx: Ctx, skill: SkillSummary, payload: Payload): Promise<Gui
       ctx,
       'Where should it go?',
       [
-        { label: `This project only (${here})`, detail: 'Your agent uses it when you work in this folder.' },
-        { label: 'Every project (your home folder)', detail: 'Your agent uses it in any folder on this computer.' },
+        { label: `This project only: ${here}`, detail: 'Your agent uses it when you work in this folder.' },
+        { label: 'Every project: your home folder', detail: 'Your agent uses it in any folder on this computer.' },
       ],
       0
     )
     base = scope === 0 ? io.cwd : io.homedir
     out.info('')
   }
+  const pick = await choose(
+    ctx,
+    'Which AI agents should use it?',
+    [
+      { label: 'Claude Code', detail: 'Writes it to .claude/skills.' },
+      { label: 'Codex, Cursor and other agents', detail: 'Writes it to .agents/skills.' },
+      { label: 'Both', detail: 'Writes it to both folders. Right if you are not sure.' },
+    ],
+    current.claude && current.agents ? 2 : current.claude ? 0 : 1
+  )
+  out.info('')
+  return { base, claude: pick !== 1, agents: pick !== 0 }
+}
 
-  const used = agentsInUse(ctx)
-  let agents: Pick<Targets, 'claude' | 'agents'>
-  if (used.claude !== used.others) {
-    agents = { claude: used.claude, agents: used.others }
-  } else {
-    const pick = await choose(
-      ctx,
-      'Which AI agents should use it?',
-      [
-        { label: 'Claude Code', detail: 'Writes it to .claude/skills.' },
-        { label: 'Codex, Cursor and other agents', detail: 'Writes it to .agents/skills.' },
-        { label: 'Both', detail: 'Writes it to both folders. Right if you are not sure.' },
-      ],
-      2
-    )
-    agents = { claude: pick !== 1, agents: pick !== 0 }
-    out.info('')
-  }
-  const targets: Targets = { base, ...agents }
-  const plan = planInstall(skillDirs(targets, skill.name), payload)
+async function ask(ctx: Ctx, skill: SkillSummary, payload: Payload): Promise<GuideResult> {
+  const { out } = ctx
+  const force = ctx.flags.force === true
+  const files = payload.type === 'archive' ? payload.archive.files.map((f) => f.bytes.length) : [payload.body.length]
+  const facts = [`This adds the ${skill.name} skill, by ${skill.publisher}${skill.version ? `, version ${skill.version}` : ''}, to a folder your AI agent reads.`]
+  const what = firstClause(skill.description)
+  if (what) facts.push(`  What it does: ${what}`)
+  facts.push(`  Size: ${files.length} file${files.length === 1 ? '' : 's'}, ${size(files.reduce((a, b) => a + b, 0))}`)
+  // Ends with a blank line before where it goes.
+  out.info(`${facts.join('\n')}\n\n`)
 
-  if (plan.every((p) => p.action === 'unchanged')) return { kind: 'up-to-date', targets, plan }
-  const clashes = plan.filter((p) => p.action === 'replaced')
-  if (clashes.length > 0) {
-    out.info(
-      [
+  let targets = defaultTargets(ctx)
+  let changed = false
+  for (;;) {
+    const plan = planInstall(skillDirs(targets, skill.name), payload)
+    if (plan.every((p) => p.action === 'unchanged')) return { kind: 'up-to-date', targets, plan }
+    const clashes = plan.filter((p) => p.action === 'replaced')
+    const where = targets.base === ctx.io.homedir ? 'every project' : 'this project'
+    const lines = [`It goes to ${where}, for ${agentLabel(targets)}:`]
+    for (const p of plan) lines.push(`  ${shownPath(ctx, p.path)}${p.action === 'unchanged' ? ' (already up to date)' : ''}`)
+    if (clashes.length > 0) {
+      lines.push(
+        '',
         `A different copy of ${skill.name} is already at ${clashes.map((p) => shownPath(ctx, p.path)).join(' and ')}.`,
-        'Replacing it deletes that copy, with any changes you made to it.',
-      ].join('\n')
-    )
-    const answer = (await io.prompt('Type y to replace it, or press Enter to keep yours: ')).trim().toLowerCase()
-    if (answer !== 'y' && answer !== 'yes') return { kind: 'kept', targets, plan }
-    return { kind: 'install', targets, plan, force: true }
-  }
+        force ? 'It will replace that copy (--force).' : 'Replacing it deletes that copy, with any changes you made to it.'
+      )
+    }
 
-  out.info([`Ready to add ${skill.name} for ${agentLabel(targets)}:`, ...plan.map((p) => `  ${shownPath(ctx, p.path)}`)].join('\n'))
-  const go = (await io.prompt('Press Enter to add it, or Ctrl+C to stop: ')).trim().toLowerCase()
-  if (go === 'n' || go === 'no') throw new PromptCancelled()
-  return { kind: 'install', targets, plan, force: false }
+    // After `c`, the choice was the go-ahead; only a replacement still asks.
+    if (changed && (clashes.length === 0 || force)) {
+      out.info(lines.join('\n'))
+      return { kind: 'install', targets, plan, force }
+    }
+    out.info(lines.join('\n'))
+    if (clashes.length > 0 && !force) {
+      const question = changed
+        ? 'Press Enter to keep yours. Type y to replace it, or Ctrl+C to stop: '
+        : 'Press Enter to keep yours. Type y to replace it, c to change where, or Ctrl+C to stop: '
+      const answer = await key(ctx, question, changed ? ['', 'y'] : ['', 'y', 'c'])
+      if (answer === '') return { kind: 'kept', targets, plan }
+      if (answer === 'y') return { kind: 'install', targets, plan, force: true }
+    } else {
+      const answer = await key(ctx, 'Press Enter to add it. Type c to change where, or Ctrl+C to stop: ', ['', 'c'])
+      if (answer === '') return { kind: 'install', targets, plan, force }
+    }
+    targets = await changeWhere(ctx, targets)
+    changed = true
+  }
 }
 
 /** The one line on what to do next, for these targets. */
 export function nextStep(ctx: Ctx, targets: Targets): string {
   const where = targets.base === ctx.io.homedir ? 'in any folder' : 'in this folder'
-  const who = targets.claude && !targets.agents ? 'Claude Code' : targets.agents && !targets.claude ? 'Codex, Cursor or your other agent' : 'your agent'
+  const who = targets.claude && !targets.agents ? 'Claude Code' : targets.agents && !targets.claude ? 'Codex, Cursor or your other agent' : 'Claude Code or your other agent'
   return `Next: start a new session in ${who}, ${where}. The skill loads by itself when a request matches what it does.`
 }

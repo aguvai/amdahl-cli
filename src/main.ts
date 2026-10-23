@@ -75,6 +75,7 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
     if (out.json) {
       const error: Record<string, string> = { code: e.code, message: e.message }
       if (e.hint) error.hint = e.hint
+      if (e.detail) error.detail = e.detail
       io.stdout(`${JSON.stringify({ ok: false, error })}\n`)
     } else {
       // A person who pressed Ctrl+C gets a plain line, not an error.

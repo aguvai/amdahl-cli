@@ -21,7 +21,7 @@ import { parseDocument } from 'yaml'
 import { str, type Ctx } from '../context'
 import { CliError, EXIT, exitForHttp, usageError } from '../errors'
 import { ArchiveError, readSkillArchive, type SkillArchive } from '../tar-gz'
-import { guide, nextStep, shouldGuide, shownPath, type SkillSummary } from './skills-guide'
+import { guide, nextStep, runningAgent, shouldGuide, shownPath, type SkillSummary } from './skills-guide'
 import { planInstall, refuseClashes, skillDirs, writeInstall, type FilePlan, type Payload, type Targets } from './skills-install'
 
 /** Where the skills library is published. */
@@ -107,7 +107,7 @@ export function parseSkillRef(raw: string, site: string): SkillRef {
  * after `io.fetchTimeoutMs`, headers and body together, and refuses a body
  * over `maxBytes`: by its Content-Length when it sends one, else as it reads.
  */
-async function get(ctx: Ctx, url: string, what: string, site: string, maxBytes: number): Promise<Buffer> {
+async function get(ctx: Ctx, url: string, what: string, site: string, maxBytes: number, notFound?: CliError): Promise<Buffer> {
   const timeoutMs = ctx.io.fetchTimeoutMs
   const signal = AbortSignal.timeout(timeoutMs)
   // Rejects when the time is up, so a stalled body is cut off too, whatever
@@ -137,6 +137,7 @@ async function get(ctx: Ctx, url: string, what: string, site: string, maxBytes: 
       throw new CliError('skill_redirect', `${url} answered with a redirect, and skills add follows none.`, EXIT.general)
     }
     if (res.status === 404) {
+      if (notFound) throw notFound
       throw new CliError('skill_not_found', `No ${what} at ${url}.`, EXIT.general, `Check the publisher and skill name at ${site}/skills.`)
     }
     throw new CliError(`http_${res.status}`, `${url} answered HTTP ${res.status}.`, exitForHttp(res.status))
@@ -211,15 +212,16 @@ export function readIndex(body: Buffer, indexUrl: string, ref: SkillRef, site: s
   }
 }
 
-/** Refuse downloaded bytes whose sha256 differs from the index digest. */
+/** Refuse downloaded bytes whose sha256 differs from the index digest. The hashes go to `--json` only. */
 export function checkDigest(body: Buffer, fileUrl: string, sha256: string): void {
   const actual = createHash('sha256').update(body).digest('hex')
   if (actual !== sha256) {
     throw new CliError(
       'digest_mismatch',
-      `${fileUrl} does not match its index: its sha256 is ${actual}, the index says ${sha256}.`,
+      `The download did not match what ${new URL(fileUrl).host} lists, so nothing was written.`,
       EXIT.general,
-      'Nothing was written. Try again; if it repeats, report it.'
+      'Try again.',
+      `${fileUrl} has sha256 ${actual}; the index says ${sha256}.`
     )
   }
 }
@@ -280,8 +282,36 @@ export function readArchive(body: Buffer, url: string, ref: SkillRef): { archive
 }
 
 /** The note for an install that asked nothing and was given no place: where it went, and how to choose. */
-const DEFAULTS_NOTE =
-  'Added for Claude Code in this project, the default. For every project add -g; for Codex, Cursor and other agents add --agents.'
+function defaultsNote(agent: 'claude' | 'cursor' | null): string {
+  if (agent === 'cursor') return 'Added to .agents/skills in this project, for Cursor, which ran this. For every project add -g.'
+  const who = agent === 'claude' ? 'Claude Code, which ran this' : 'Claude Code, the default'
+  return `Added for ${who}, in this project. For every project add -g; for Codex, Cursor and other agents add --agents.`
+}
+
+/** What was downloaded and checked: the index entry, the skill itself, and what its SKILL.md says. */
+interface Fetched {
+  entry: IndexEntry
+  payload: Payload
+  meta: { description: string; version?: string }
+}
+
+/** Read the index, download the skill and check it all. Writes nothing. */
+async function fetchSkill(ctx: Ctx, ref: SkillRef, site: string): Promise<Fetched> {
+  const host = new URL(site).host
+  const indexUrl = `${site}/skills/${ref.publisher}/${ref.skill}/.well-known/agent-skills/index.json`
+  const missing = new CliError('skill_not_found', `${host} has no skill ${ref.publisher}/${ref.skill}.`, EXIT.general, `Find it at ${site}/skills`)
+  const entry = readIndex(await get(ctx, indexUrl, 'skill index', site, MAX_INDEX_BYTES, missing), indexUrl, ref, site)
+  const { type, url, sha256 } = entry
+  if (type === 'archive') {
+    const body = await get(ctx, url, 'skill archive', site, MAX_ARCHIVE_BYTES)
+    checkDigest(body, url, sha256)
+    const read = readArchive(body, url, ref)
+    return { entry, payload: { type, archive: read.archive }, meta: read.meta }
+  }
+  const body = await get(ctx, url, 'SKILL.md', site, MAX_SKILL_BYTES)
+  checkDigest(body, url, sha256)
+  return { entry, payload: { type, body }, meta: checkSkillMd(body, url, ref) }
+}
 
 /** `amdahl skills add <publisher>/<skill>`. */
 export async function skillsAdd(ctx: Ctx, args: string[]): Promise<number> {
@@ -289,27 +319,23 @@ export async function skillsAdd(ctx: Ctx, args: string[]): Promise<number> {
   const siteFlag = str(ctx.flags.site)
   const site = siteFlag ? normaliseSite(siteFlag) : DEFAULT_SKILLS_SITE
   const ref = parseSkillRef(args[0], site)
+  const guided = shouldGuide(ctx)
 
   // Download and check everything first: nothing is written, and no question is asked, until it passes.
-  const indexUrl = `${site}/skills/${ref.publisher}/${ref.skill}/.well-known/agent-skills/index.json`
-  const entry = readIndex(await get(ctx, indexUrl, 'skill index', site, MAX_INDEX_BYTES), indexUrl, ref, site)
-  const { type, url, sha256 } = entry
-  let payload: Payload
-  let meta: { description: string; version?: string }
-  if (type === 'archive') {
-    const body = await get(ctx, url, 'skill archive', site, MAX_ARCHIVE_BYTES)
-    checkDigest(body, url, sha256)
-    const read = readArchive(body, url, ref)
-    payload = { type, archive: read.archive }
-    meta = read.meta
-  } else {
-    const body = await get(ctx, url, 'SKILL.md', site, MAX_SKILL_BYTES)
-    checkDigest(body, url, sha256)
-    meta = checkSkillMd(body, url, ref)
-    payload = { type, body }
+  // A person sees a line while that runs, since a folder skill can take a while.
+  if (guided) ctx.io.stderr(`Checking ${ref.publisher}/${ref.skill} on ${new URL(site).host}... `)
+  let fetched: Fetched
+  try {
+    fetched = await fetchSkill(ctx, ref, site)
+  } catch (err) {
+    if (guided) ctx.io.stderr('\n')
+    throw err
   }
+  if (guided) ctx.io.stderr('OK\n\n')
+  const { entry, payload, meta } = fetched
+  const { url, sha256 } = entry
 
-  const guided = shouldGuide(ctx)
+  const agent = runningAgent(ctx)
   let targets: Targets
   let plan: FilePlan[]
   if (guided) {
@@ -318,7 +344,6 @@ export async function skillsAdd(ctx: Ctx, args: string[]): Promise<number> {
       publisher: ref.publisher,
       description: entry.description || meta.description,
       version: entry.version ?? meta.version,
-      sha256,
       host: new URL(site).host,
     }
     const settled = await guide(ctx, summary, payload)
@@ -330,7 +355,10 @@ export async function skillsAdd(ctx: Ctx, args: string[]): Promise<number> {
     }
     if (settled.kind === 'install') writeInstall(ctx.io, plan, ref.skill, payload)
   } else {
-    targets = { base: ctx.flags.global === true ? ctx.io.homedir : ctx.io.cwd, claude: true, agents: ctx.flags.agents === true }
+    // No questions: the flags say where; without --agents, the agent that ran this picks its own folder.
+    const agentsFlag = ctx.flags.agents === true
+    const cursorOnly = !agentsFlag && agent === 'cursor'
+    targets = { base: ctx.flags.global === true ? ctx.io.homedir : ctx.io.cwd, claude: !cursorOnly, agents: agentsFlag || cursorOnly }
     plan = planInstall(skillDirs(targets, ref.skill), payload)
     refuseClashes(plan, ref.skill, ctx.flags.force === true)
     writeInstall(ctx.io, plan, ref.skill, payload)
@@ -355,6 +383,6 @@ export async function skillsAdd(ctx: Ctx, args: string[]): Promise<number> {
     return EXIT.ok
   }
   ctx.out.result(contents ? { ...result, contents } : result, lines.join('\n'))
-  if (!ctx.out.json && ctx.flags.global !== true && ctx.flags.agents !== true && ctx.flags.yes !== true) ctx.out.info(DEFAULTS_NOTE)
+  if (!ctx.out.json && ctx.flags.global !== true && ctx.flags.agents !== true && ctx.flags.yes !== true) ctx.out.info(defaultsNote(agent))
   return EXIT.ok
 }

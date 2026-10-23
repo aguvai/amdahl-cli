@@ -121,29 +121,32 @@ npx amdahl skills add <publisher>/<skill>
 npx amdahl skills add https://amdahl.ai/skills/<publisher>/<skill>
 ```
 
-In a terminal, it walks you through the install. It first downloads and
-checks the skill, then shows what it is (name, publisher, files, checksum)
-before it writes anything. Then it asks only what it cannot work out, and
-the recommended answer is already chosen, so Enter is always right:
+In a terminal, it takes one keypress. It prints `Checking <publisher>/<skill>
+on amdahl.ai... OK` while it downloads and checks the skill. Then it says what
+the skill is and where it will go, before it writes anything:
 
-- **Where:** this project only (recommended), or every project. It does not
-  ask when you run it from your home folder.
-- **Which agents:** Claude Code (`.claude/skills`), Codex, Cursor and other
-  agents (`.agents/skills`), or both (recommended). It does not ask when it
-  sees only one kind in use: a `.claude` folder here or in your home folder,
-  or `CLAUDECODE` set, means Claude Code; `.agents`, `.codex` or `.cursor`
-  means the others.
-- **Replace:** only when a different copy is already there. Enter keeps
-  yours; type `y` to replace it.
+- **Where:** this project.
+- **Which agents:** the ones it sees in use. A `.claude` folder here or in your
+  home folder, or `CLAUDECODE` set, means Claude Code (`.claude/skills`). An
+  `.agents`, `.codex` or `.cursor` folder means Codex, Cursor and other agents
+  (`.agents/skills`). When it sees both kinds, or neither, it uses both.
 
-Then press Enter to add it. It ends with what to do next. Ctrl+C at any
-question stops it with nothing written (exit 130).
+Press Enter to add it. Type `c` to change where: this project or every
+project (not asked in your home folder), then which agents. Ctrl+C stops it
+with nothing written (exit 130). If a different copy of the skill is already
+there, Enter keeps yours and `y` replaces it; with `--force` it replaces it
+without asking. If the skill is already up to date, it asks nothing. It ends
+with the folders it wrote and what to do next.
 
 It never asks when stdin or stdout is not a terminal (an agent, CI, a pipe),
 or with `--json`, `-y`, `-g` or `--agents`, or with `AMDAHL_NO_PROMPT=1`.
-Then it uses the flags: with none, it adds the skill for Claude Code in this
-project, and says so. `-y` (`--yes`) takes those defaults without asking.
-Neither replaces a different copy without `--force`.
+Then the flags say where. Without `--agents`, it uses the folder of the agent
+that ran it, when that agent says so: Claude Code sets `CLAUDECODE`
+(`.claude/skills`), Cursor sets `CURSOR_AGENT` (`.agents/skills`). Codex
+documents no such variable, so a run from Codex gets the default, Claude
+Code. Without flags it says on stderr where the skill went. `-y` (`--yes`)
+adds it to this project without asking. Neither replaces a different copy
+without `--force`.
 
 It reads the skill's index,
 `https://amdahl.ai/skills/<publisher>/<skill>/.well-known/agent-skills/index.json`

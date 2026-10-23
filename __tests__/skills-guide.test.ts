@@ -1,7 +1,8 @@
-// The guided `skills add`: a person at a terminal is asked only what cannot
-// be worked out, Enter always takes the right answer, and Ctrl+C writes
-// nothing. Without a terminal (an agent, CI, a pipe), or with -y, -g,
-// --agents or --json, nothing is asked.
+// The guided `skills add`: a person at a terminal presses Enter once. It
+// shows where the skill goes (this project, for the agents in use) and asks
+// once; `c` changes where, Ctrl+C writes nothing. Without a terminal (an
+// agent, CI, a pipe), or with -y, -g, --agents or --json, nothing is asked,
+// and an agent that ran it gets its own folder when it says who it is.
 
 import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -38,116 +39,117 @@ function terminal(answers: (string | null)[] = [], env: Record<string, string> =
 
 const claudeDir = (base: string) => join(base, '.claude', 'skills', 'system-diagram')
 const agentsDir = (base: string) => join(base, '.agents', 'skills', 'system-diagram')
+const GO = 'Press Enter to add it. Type c to change where, or Ctrl+C to stop: '
+const KEEP = 'Press Enter to keep yours. Type y to replace it, c to change where, or Ctrl+C to stop: '
 const SCOPE = 'Press Enter for 1, or type a number: '
-const AGENTS = 'Press Enter for 3, or type a number: '
-const CONFIRM = 'Press Enter to add it, or Ctrl+C to stop: '
 const add = (io: FakeIo, ...flags: string[]) => cli(io, 'skills', 'add', 'amdahl/system-diagram', ...flags)
+const NEXT_TAIL = 'The skill loads by itself when a request matches what it does.'
+
+/** Put a different copy of the skill in the project's .claude/skills. */
+function ownCopy(io: FakeIo) {
+  mkdirSync(claudeDir(io.cwd), { recursive: true })
+  writeFileSync(join(claudeDir(io.cwd), 'SKILL.md'), 'mine\n')
+}
 
 afterEach(() => {
   vi.unstubAllGlobals()
 })
 
 describe('skills add, guided', () => {
-  it('walks a person through it: Enter at every question is right', async () => {
+  it('the main path is one Enter: it says what and where, then adds it', async () => {
     const fetchMock = serve()
-    const io = terminal()
-    const here = `~${io.cwd.slice(io.homedir.length)}`
+    const io = terminal([], { CLAUDECODE: '1' })
     const r = await add(io)
     expect(r.code).toBe(0)
-    expect(io.prompts).toEqual([SCOPE, AGENTS, CONFIRM])
-    // Nothing seen of any agent, so Both: right for whichever one they use.
+    expect(io.prompts).toEqual([GO])
     expect(readdirSync(claudeDir(io.cwd)).sort()).toEqual(['SKILL.md', 'build.py', 'engine'])
-    expect(readdirSync(agentsDir(io.cwd)).sort()).toEqual(['SKILL.md', 'build.py', 'engine'])
+    expect(existsSync(join(io.cwd, '.agents'))).toBe(false)
     expect(r.stderr).toBe(
       [
-        'This adds the system-diagram skill from amdahl.ai to a folder your AI agent reads.',
-        'Nothing is written until you say so.',
+        'Checking amdahl/system-diagram on amdahl.ai... OK',
         '',
-        '  Skill:     system-diagram, by amdahl',
-        '  Does:      Turn a spec into a diagram page',
-        `  Files:     3 files, ${archiveFilesSize()}`,
-        `  Checksum:  sha256 ${SHA.slice(0, 12)}, matches amdahl.ai`,
+        'This adds the system-diagram skill, by amdahl, to a folder your AI agent reads.',
+        '  What it does: Turn a spec into a diagram page',
+        '  Size: 3 files, 111 bytes',
         '',
-        'Where should it go?',
-        `  1. This project only (${here}) (recommended)`,
-        '     Your agent uses it when you work in this folder.',
-        '  2. Every project (your home folder)',
-        '     Your agent uses it in any folder on this computer.',
-        '',
-        'Which AI agents should use it?',
-        '  1. Claude Code',
-        '     Writes it to .claude/skills.',
-        '  2. Codex, Cursor and other agents',
-        '     Writes it to .agents/skills.',
-        '  3. Both (recommended)',
-        '     Writes it to both folders. Right if you are not sure.',
-        '',
-        'Ready to add system-diagram for Claude Code, Codex, Cursor and other agents:',
+        'It goes to this project, for Claude Code:',
         '  ./.claude/skills/system-diagram',
-        '  ./.agents/skills/system-diagram',
         '',
-        'Next: start a new session in your agent, in this folder. The skill loads by itself when a request matches what it does.',
+        `Next: start a new session in Claude Code, in this folder. ${NEXT_TAIL}`,
         '',
       ].join('\n')
     )
-    expect(r.stdout).toBe('Done. Added system-diagram (3 files) to:\n  ./.claude/skills/system-diagram\n  ./.agents/skills/system-diagram\n')
-    // Still exactly the two requests.
+    expect(r.stdout).toBe('Done. Added system-diagram (3 files) to:\n  ./.claude/skills/system-diagram\n')
+    // Still exactly the two requests, and no checksum line for a person to read.
     expect(fetchMock.mock.calls.map((c) => c[0])).toEqual([INDEX, ARCHIVE])
+    expect(r.stderr).not.toContain('sha256')
   })
 
-  it.each<[string, (io: FakeIo) => void, Record<string, string>]>([
-    ['a .claude folder in the project', (io) => mkdirSync(join(io.cwd, '.claude')), {}],
-    ['a .claude folder at home', (io) => mkdirSync(join(io.homedir, '.claude')), {}],
-    ['CLAUDECODE set', () => {}, { CLAUDECODE: '1' }],
-  ])('skips the agents question when only Claude Code is in use (%s)', async (_label, setUp, env) => {
+  it.each<[string, (io: FakeIo) => void, Record<string, string>, boolean, boolean, string]>([
+    ['nothing seen: both folders', () => {}, {}, true, true, 'Claude Code or your other agent'],
+    ['a .claude folder in the project', (io) => mkdirSync(join(io.cwd, '.claude')), {}, true, false, 'Claude Code'],
+    ['a .claude folder at home', (io) => mkdirSync(join(io.homedir, '.claude')), {}, true, false, 'Claude Code'],
+    ['CLAUDECODE set', () => {}, { CLAUDECODE: '1' }, true, false, 'Claude Code'],
+    ['an .agents folder at home', (io) => mkdirSync(join(io.homedir, '.agents')), {}, false, true, 'Codex, Cursor or your other agent'],
+    ['a .codex folder at home', (io) => mkdirSync(join(io.homedir, '.codex')), {}, false, true, 'Codex, Cursor or your other agent'],
+    ['a .cursor folder at home', (io) => mkdirSync(join(io.homedir, '.cursor')), {}, false, true, 'Codex, Cursor or your other agent'],
+    [
+      'both kinds seen: both folders',
+      (io) => {
+        mkdirSync(join(io.homedir, '.claude'))
+        mkdirSync(join(io.homedir, '.codex'))
+      },
+      {},
+      true,
+      true,
+      'Claude Code or your other agent',
+    ],
+  ])('picks the agents from what it sees (%s), still with one Enter', async (_label, setUp, env, claude, agents, who) => {
     serve()
     const io = terminal([], env)
     setUp(io)
-    expect((await add(io)).code).toBe(0)
-    expect(io.prompts).toEqual([SCOPE, CONFIRM])
-    expect(existsSync(claudeDir(io.cwd))).toBe(true)
-    expect(existsSync(join(io.cwd, '.agents'))).toBe(false)
-  })
-
-  it.each(['.agents', '.codex', '.cursor'])('skips it too when only other agents are in use (%s)', async (dir) => {
-    serve()
-    const io = terminal()
-    mkdirSync(join(io.homedir, dir))
     const r = await add(io)
-    expect(io.prompts).toEqual([SCOPE, CONFIRM])
-    expect(existsSync(agentsDir(io.cwd))).toBe(true)
-    expect(existsSync(join(io.cwd, '.claude'))).toBe(false)
-    expect(r.stderr).toContain('Next: start a new session in Codex, Cursor or your other agent, in this folder.')
+    expect(io.prompts).toEqual([GO])
+    expect(existsSync(claudeDir(io.cwd))).toBe(claude)
+    expect(existsSync(agentsDir(io.cwd))).toBe(agents)
+    expect(r.stderr).toContain(`Next: start a new session in ${who}, in this folder.`)
   })
 
-  it('takes typed choices: every project, Claude Code only', async () => {
+  it('c opens the two questions: every project, Claude Code only, then adds it without asking again', async () => {
     serve()
-    const io = terminal(['2', '1', ''])
+    const io = terminal(['c', '2', '1'])
+    const here = `~${io.cwd.slice(io.homedir.length)}`
     const r = await add(io)
     expect(r.code).toBe(0)
+    expect(io.prompts).toEqual([GO, SCOPE, 'Press Enter for 3, or type a number: '])
     expect(existsSync(claudeDir(io.homedir))).toBe(true)
     expect(existsSync(agentsDir(io.homedir))).toBe(false)
     expect(existsSync(join(io.cwd, '.claude'))).toBe(false)
-    expect(r.stderr).toContain('Ready to add system-diagram for Claude Code:\n  ~/.claude/skills/system-diagram\n')
+    expect(r.stderr).toContain(`  1. This project only: ${here} (recommended)\n`)
+    expect(r.stderr).toContain('  2. Every project: your home folder\n')
+    expect(r.stderr).toContain('It goes to every project, for Claude Code:\n  ~/.claude/skills/system-diagram\n')
+    expect(r.stdout).toBe('Done. Added system-diagram (3 files) to:\n  ~/.claude/skills/system-diagram\n')
     expect(r.stderr).toContain('Next: start a new session in Claude Code, in any folder.')
   })
 
-  it('asks again after an answer it cannot read', async () => {
+  it('asks again after an answer it cannot read, at each kind of question', async () => {
     serve()
-    const io = terminal(['seven', '', '2', ''])
+    const io = terminal(['what', 'c', 'seven', '', '2'])
     expect((await add(io)).code).toBe(0)
-    expect(io.prompts).toEqual([SCOPE, SCOPE, AGENTS, CONFIRM])
-    expect(io.err.join('')).toContain('Type a number from 1 to 2, or press Enter.')
+    expect(io.prompts).toEqual([GO, GO, SCOPE, SCOPE, 'Press Enter for 3, or type a number: '])
+    const err = io.err.join('')
+    expect(err).toContain('Press Enter, or type c.')
+    expect(err).toContain('Type a number from 1 to 2, or press Enter.')
     expect(existsSync(agentsDir(io.cwd))).toBe(true)
     expect(existsSync(join(io.cwd, '.claude'))).toBe(false)
   })
 
-  it('does not ask where when this folder is the home folder', async () => {
+  it('does not ask this-project-or-every-project in the home folder', async () => {
     serve()
-    const io = terminal([], { CLAUDECODE: '1' })
+    const io = terminal(['c', ''])
     io.cwd = io.homedir
     expect((await add(io)).code).toBe(0)
-    expect(io.prompts).toEqual([CONFIRM])
+    expect(io.prompts).toEqual([GO, 'Press Enter for 3, or type a number: '])
     expect(existsSync(claudeDir(io.homedir))).toBe(true)
   })
 
@@ -155,14 +157,14 @@ describe('skills add, guided', () => {
     serve({ version: '0.1.1' })
     const io = terminal()
     await add(io)
-    expect(io.err.join('')).toContain('  Skill:     system-diagram, by amdahl, version 0.1.1\n')
+    expect(io.err.join('')).toContain('This adds the system-diagram skill, by amdahl, version 0.1.1, to a folder your AI agent reads.\n')
   })
 
   it.each<[string, (string | null)[]]>([
-    ['the first question', [null]],
-    ['the agents question', ['', null]],
-    ['the last step', ['', '', null]],
-    ['a "no" at the last step', ['', '', 'n']],
+    ['the one question', [null]],
+    ['a "no" at the one question', ['n']],
+    ['the where question', ['c', null]],
+    ['the agents question', ['c', '', null]],
   ])('Ctrl+C at %s stops with nothing written', async (_label, answers) => {
     serve()
     const io = terminal(answers)
@@ -173,14 +175,13 @@ describe('skills add, guided', () => {
     expect(readdirSync(io.cwd)).toEqual([])
   })
 
-  it('keeps a different copy on Enter, and replaces it only on y', async () => {
+  it('a different copy: Enter keeps it, y replaces it, with no second question', async () => {
     serve()
-    const io = terminal(['', ''], { CLAUDECODE: '1' })
-    mkdirSync(claudeDir(io.cwd), { recursive: true })
-    writeFileSync(join(claudeDir(io.cwd), 'SKILL.md'), 'mine\n')
+    const io = terminal([''], { CLAUDECODE: '1' })
+    ownCopy(io)
     const kept = await add(io)
     expect(kept.code).toBe(0)
-    expect(io.prompts).toEqual([SCOPE, 'Type y to replace it, or press Enter to keep yours: '])
+    expect(io.prompts).toEqual([KEEP])
     expect(kept.stderr).toContain(
       'A different copy of system-diagram is already at ./.claude/skills/system-diagram.\nReplacing it deletes that copy, with any changes you made to it.\n'
     )
@@ -188,25 +189,55 @@ describe('skills add, guided', () => {
     expect(readFileSync(join(claudeDir(io.cwd), 'SKILL.md'), 'utf8')).toBe('mine\n')
 
     io.prompts.length = 0
-    io.answers.push('', 'y')
+    io.answers.push('y')
     const replaced = await add(io)
     expect(replaced.code).toBe(0)
-    // The y was the go-ahead: no second confirmation.
-    expect(io.prompts).toHaveLength(2)
+    expect(io.prompts).toEqual([KEEP])
     expect(replaced.stdout).toBe('Done. Added system-diagram (3 files) to:\n  ./.claude/skills/system-diagram\n')
     expect(readFileSync(join(claudeDir(io.cwd), 'SKILL.md'), 'utf8')).toBe(SKILL)
   })
 
-  it('says so, without asking to confirm, when it is already up to date', async () => {
+  it('a different copy found after c still asks, and Enter still keeps it', async () => {
     serve()
-    const io = terminal(['', ''], { CLAUDECODE: '1' })
+    const io = terminal(['c', '', '1', ''])
+    ownCopy(io)
+    const r = await add(io)
+    expect(r.code).toBe(0)
+    expect(io.prompts.at(-1)).toBe('Press Enter to keep yours. Type y to replace it, or Ctrl+C to stop: ')
+    expect(readFileSync(join(claudeDir(io.cwd), 'SKILL.md'), 'utf8')).toBe('mine\n')
+  })
+
+  it('--force at a terminal replaces a different copy without the replace question', async () => {
+    serve()
+    const io = terminal([''], { CLAUDECODE: '1' })
+    ownCopy(io)
+    const r = await add(io, '--force')
+    expect(r.code).toBe(0)
+    expect(io.prompts).toEqual([GO])
+    expect(r.stderr).toContain('It will replace that copy (--force).')
+    expect(readFileSync(join(claudeDir(io.cwd), 'SKILL.md'), 'utf8')).toBe(SKILL)
+  })
+
+  it('asks nothing when it is already up to date', async () => {
+    serve()
+    const io = terminal([''], { CLAUDECODE: '1' })
     await add(io)
     io.prompts.length = 0
-    io.answers.push('')
     const r = await add(io)
-    expect(io.prompts).toEqual([SCOPE])
+    expect(io.prompts).toEqual([])
     expect(r.stdout).toBe('Already up to date: ./.claude/skills/system-diagram\n')
     expect(r.stderr).toContain('Next: start a new session in Claude Code, in this folder.')
+  })
+
+  it('a skill that is not there: plain words, the progress line closed, no index URL', async () => {
+    serve()
+    const io = terminal()
+    const r = await cli(io, 'skills', 'add', 'amdahl/nope')
+    expect(r.code).toBe(1)
+    expect(r.stderr).toBe(
+      'Checking amdahl/nope on amdahl.ai... \nError: amdahl.ai has no skill amdahl/nope.\nFind it at https://amdahl.ai/skills\n'
+    )
+    expect(io.prompts).toEqual([])
   })
 })
 
@@ -227,17 +258,41 @@ describe('skills add, never asks', () => {
     const r = await add(io, ...flags)
     expect(r.code).toBe(0)
     expect(io.prompts).toEqual([])
+    expect(r.stderr).not.toContain('Checking ')
   })
 
-  it('without a terminal it uses the defaults and says so; -y uses them quietly', async () => {
+  it.each<[string, Record<string, string>, boolean, boolean, string]>([
+    [
+      'no agent named',
+      {},
+      true,
+      false,
+      'Added for Claude Code, the default, in this project. For every project add -g; for Codex, Cursor and other agents add --agents.\n',
+    ],
+    [
+      'Claude Code (CLAUDECODE)',
+      { CLAUDECODE: '1' },
+      true,
+      false,
+      'Added for Claude Code, which ran this, in this project. For every project add -g; for Codex, Cursor and other agents add --agents.\n',
+    ],
+    ['Cursor (CURSOR_AGENT)', { CURSOR_AGENT: '1' }, false, true, 'Added to .agents/skills in this project, for Cursor, which ran this. For every project add -g.\n'],
+  ])('without a terminal, run by %s, it picks that folder and says so', async (_label, env, claude, agents, note) => {
     serve()
-    const piped = fakeIo()
-    const r = await add(piped)
-    expect(existsSync(claudeDir(piped.cwd))).toBe(true)
-    expect(existsSync(join(piped.cwd, '.agents'))).toBe(false)
-    expect(r.stderr).toBe(
-      'Added for Claude Code in this project, the default. For every project add -g; for Codex, Cursor and other agents add --agents.\n'
-    )
+    const io = fakeIo(env)
+    const r = await add(io)
+    expect(r.code).toBe(0)
+    expect(existsSync(claudeDir(io.cwd))).toBe(claude)
+    expect(existsSync(agentsDir(io.cwd))).toBe(agents)
+    expect(r.stderr).toBe(note)
+  })
+
+  it('--agents wins over the agent that ran it; -y adds quietly', async () => {
+    serve()
+    const io = fakeIo({ CURSOR_AGENT: '1' })
+    await add(io, '--agents')
+    expect(existsSync(claudeDir(io.cwd))).toBe(true)
+    expect(existsSync(agentsDir(io.cwd))).toBe(true)
     const yes = await add(terminal(), '-y')
     expect(yes.stderr).toBe('')
   })
@@ -245,8 +300,7 @@ describe('skills add, never asks', () => {
   it('-y still refuses to replace a different copy without --force', async () => {
     serve()
     const io = terminal()
-    mkdirSync(claudeDir(io.cwd), { recursive: true })
-    writeFileSync(join(claudeDir(io.cwd), 'SKILL.md'), 'mine\n')
+    ownCopy(io)
     const r = await add(io, '-y', '--json')
     expect(r.json.error.code).toBe('skill_exists')
     expect(readFileSync(join(claudeDir(io.cwd), 'SKILL.md'), 'utf8')).toBe('mine\n')
@@ -268,9 +322,3 @@ describe('skills add, never asks', () => {
     }
   })
 })
-
-/** The file sizes in the test archive, as the guide prints them. */
-function archiveFilesSize(): string {
-  const bytes = Buffer.byteLength(SKILL) + Buffer.byteLength('print(1)\n') + Buffer.byteLength('export {}\n')
-  return `${bytes} bytes`
-}

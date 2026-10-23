@@ -69,7 +69,7 @@ describe('skills add', () => {
     expect(r.code).toBe(0)
     expect(r.stdout).toBe(`Wrote ${projectSkill(io)}\n`)
     // No terminal to ask, so it says where it went and how to choose.
-    expect(r.stderr).toBe('Added for Claude Code in this project, the default. For every project add -g; for Codex, Cursor and other agents add --agents.\n')
+    expect(r.stderr).toBe('Added for Claude Code, the default, in this project. For every project add -g; for Codex, Cursor and other agents add --agents.\n')
     expect(readFileSync(projectSkill(io), 'utf8')).toBe(SKILL)
     // Exactly two requests, both to the site, with no redirect followed and a deadline each.
     expect(fetchMock.mock.calls).toEqual([
@@ -135,8 +135,13 @@ describe('skills add', () => {
     const io = fakeIo()
     const r = await cli(io, 'skills', 'add', 'amdahl/call-prep', '--json')
     expect(r.code).toBe(1)
-    expect(r.json.error.code).toBe('digest_mismatch')
-    expect(r.json.error.message).toContain(`the index says ${sha256(SKILL)}`)
+    // Plain words for a person; the hashes only in --json, as detail.
+    expect(r.json.error).toEqual({
+      code: 'digest_mismatch',
+      message: 'The download did not match what amdahl.ai lists, so nothing was written.',
+      hint: 'Try again.',
+      detail: `${FILE} has sha256 ${sha256(SKILL.replace('Call prep', 'Call prep, changed'))}; the index says ${sha256(SKILL)}.`,
+    })
     expect(existsSync(join(io.cwd, '.claude'))).toBe(false)
   })
 
@@ -311,7 +316,11 @@ describe('skills add', () => {
     serve({})
     const missing = await cli(fakeIo(), 'skills', 'add', 'amdahl/nope', '--json')
     expect(missing.code).toBe(1)
-    expect(missing.json.error.code).toBe('skill_not_found')
+    expect(missing.json.error).toEqual({
+      code: 'skill_not_found',
+      message: 'amdahl.ai has no skill amdahl/nope.',
+      hint: 'Find it at https://amdahl.ai/skills',
+    })
 
     serve({ [INDEX]: { status: 301 } })
     const moved = await cli(fakeIo(), 'skills', 'add', 'amdahl/call-prep', '--json')
@@ -336,7 +345,13 @@ describe('skills add', () => {
     }
     expect((await cli(io, 'skills', 'add')).code).toBe(2)
     expect((await cli(io, 'skills', 'add', 'a/b', 'c/d')).code).toBe(2)
-    expect((await cli(io, 'skills')).code).toBe(2)
+    const bare = await cli(io, 'skills')
+    expect(bare.code).toBe(2)
+    expect(bare.stderr).toBe('Error: `amdahl skills` needs a subcommand.\nTo add a skill: npx amdahl skills add <publisher>/<skill>\n')
+    const noAdd = await cli(io, 'skills', 'amdahl/call-prep')
+    expect(noAdd.code).toBe(2)
+    expect(noAdd.stderr).toBe('Error: Unknown command `amdahl skills amdahl/call-prep`.\nTo add a skill: npx amdahl skills add amdahl/call-prep\n')
+    expect((await cli(io, 'skills', 'list')).stderr).toContain('To add a skill: npx amdahl skills add <publisher>/<skill>')
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })

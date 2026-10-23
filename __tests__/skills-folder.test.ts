@@ -79,7 +79,7 @@ describe('skills add, folder skill', () => {
     const io = fakeIo()
     const r = await cli(io, 'skills', 'add', 'amdahl/system-diagram')
     expect(r.code).toBe(0)
-    expect(r.stderr).toBe('Added for Claude Code in this project, the default. For every project add -g; for Codex, Cursor and other agents add --agents.\n')
+    expect(r.stderr).toBe('Added for Claude Code, the default, in this project. For every project add -g; for Codex, Cursor and other agents add --agents.\n')
     expect(r.stdout).toBe(`Wrote ${projectDir(io)} (6 files)\n${CONTENTS.map((p) => `  ${p}`).join('\n')}\n`)
     expect(listFiles(projectDir(io))).toEqual(CONTENTS)
     for (const [path, spec] of Object.entries(FILES)) expect(readFileSync(join(projectDir(io), path)).equals(bodyOf(spec))).toBe(true)
@@ -173,7 +173,7 @@ describe('skills add, folder skill', () => {
     serve(gzip(rawTar([{ path: 'SKILL.md', type: '2', linkname: '/etc/passwd' }])), skillTarGz(FILES))
     const error = await refused()
     expect(error.code).toBe('digest_mismatch')
-    expect(error.message).toContain(`${ARCHIVE} does not match its index`)
+    expect((error as { detail?: string }).detail).toContain(`${ARCHIVE} has sha256 `)
   })
 
   it('refuses a download over 4 MB, by Content-Length or as it streams', async () => {

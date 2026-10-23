@@ -27,6 +27,11 @@ Commands:
   workspace list | workspace use <profile>
   install claude-code|codex|cursor [--print] [--force]
   skills add <publisher>/<skill> [-y] [-g] [--agents] [--force] [--site <origin>]
+           In a terminal it shows where the skill goes; Enter adds it there.
+           -y        add without asking, to this project
+           -g        every project (~/.claude/skills), not just this one
+           --agents  also .agents/skills, for Codex, Cursor and other agents
+           --force   replace a different copy of the skill already there
 
 Global options:
   --profile <name>   Use a saved profile (default: AMDAHL_PROFILE, then the default profile)
