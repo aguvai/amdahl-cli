@@ -7,10 +7,25 @@
 
 import type { Io } from './io'
 
+// Every C0 control character (ESC among them), DEL and every C1 control character.
+// eslint-disable-next-line no-control-regex
+const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]/g
+
+/**
+ * `text` with every control character removed, newlines too: for a string
+ * from the network (a skill's version or name, or an archive path), so it cannot
+ * move the cursor, retitle the window or clear the screen when printed.
+ */
+export function printable(text: string): string {
+  return text.replace(CONTROL_RE, '')
+}
+
 /** Writers bound to one invocation's flags. */
 export interface Output {
   /** True under `--json`. */
   json: boolean
+  /** True when colour is allowed: stderr is a terminal, not `--json`, `--no-color`, NO_COLOR or TERM=dumb. */
+  color: boolean
   /** Print the command's result: JSON on stdout, or the human lines. */
   result: (data: Record<string, unknown> | Record<string, unknown>[], human?: string) => void
   /** Print a message to stderr (never stdout). */
@@ -29,9 +44,10 @@ export interface Output {
  * @param noColor - whether `--no-color` was passed.
  */
 export function createOutput(io: Io, json: boolean, noColor: boolean): Output {
-  const color = !noColor && !io.env.NO_COLOR && io.stderrIsTTY && !json
+  const color = !noColor && !io.env.NO_COLOR && io.env.TERM !== 'dumb' && io.stderrIsTTY && !json
   return {
     json,
+    color,
     result(data, human) {
       if (json) {
         io.stdout(`${JSON.stringify(data)}\n`)

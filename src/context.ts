@@ -7,7 +7,7 @@
 import { AmdahlApiError, createAmdahlClient, type AmdahlClient } from './api'
 import { loadConfig, saveConfig, selectedProfileName, type Config, type Profile } from './config'
 import { CliError, EXIT, NOT_SIGNED_IN, exitForHttp, usageError } from './errors'
-import type { Io } from './io'
+import { PromptCancelled, type Io } from './io'
 import { refreshTokens } from './oauth'
 import type { Output } from './output'
 import { createSecretStore, keychainAccount, type SecretStore } from './secrets'
@@ -188,6 +188,7 @@ function errorDetails(body: string | undefined): Record<string, unknown> {
  */
 export function toCliError(err: unknown): CliError {
   if (err instanceof CliError) return err
+  if (err instanceof PromptCancelled) return new CliError('cancelled', 'Stopped.', EXIT.cancelled)
   if (err instanceof AmdahlApiError) {
     const exit = exitForHttp(err.statusCode, err.errorCode)
     const details = errorDetails(err.responseBody)

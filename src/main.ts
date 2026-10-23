@@ -9,6 +9,7 @@ import { authToken, login, logout, whoami } from './commands/auth'
 import { install } from './commands/install'
 import { keysCreate, keysList, keysRevoke } from './commands/keys'
 import { optimize } from './commands/optimize'
+import { skillsAdd } from './commands/skills'
 import { status, workspaceList, workspaceUse } from './commands/workspace-status'
 import { createCtx, toCliError, type Ctx } from './context'
 import { CliError, EXIT } from './errors'
@@ -31,6 +32,7 @@ const COMMANDS: Record<string, Handler> = {
   'workspace list': (ctx) => workspaceList(ctx),
   'workspace use': workspaceUse,
   install,
+  'skills add': skillsAdd,
 }
 
 /** Commands that take no positional arguments. */
@@ -73,9 +75,11 @@ export async function runCli(argv: string[], io: Io): Promise<number> {
     if (out.json) {
       const error: Record<string, string> = { code: e.code, message: e.message }
       if (e.hint) error.hint = e.hint
+      if (e.detail) error.detail = e.detail
       io.stdout(`${JSON.stringify({ ok: false, error })}\n`)
     } else {
-      io.stderr(`Error: ${e.message}\n${e.hint ? `${e.hint}\n` : ''}`)
+      // A person who pressed Ctrl+C gets a plain line, not an error.
+      io.stderr(`${e.code === 'cancelled' ? '' : 'Error: '}${e.message}\n${e.hint ? `${e.hint}\n` : ''}`)
     }
     return e.exit
   }

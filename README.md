@@ -2,7 +2,8 @@
 
 The `amdahl` command line. It signs you in with your console account, checks
 that a workspace can optimize, rewrites messages, manages API keys (each one
-approved in the console), and points MCP clients at Amdahl.
+approved in the console), points MCP clients at Amdahl, and installs skills
+from the library at https://amdahl.ai/skills.
 
 ## Using the Claude or ChatGPT app? You do not need this CLI
 
@@ -39,7 +40,8 @@ Full steps: https://amdahl.ai/connect
 
 ## Install
 
-Needs Node.js 20 or later.
+Needs Node.js 20 or later. On an older Node, `amdahl` stops before it does
+anything, names the version it found, and links the Node.js download page.
 
 ```sh
 # Run once, with no install
@@ -49,6 +51,10 @@ npx @amdahl/cli login
 npm i -g @amdahl/cli
 amdahl login
 ```
+
+`amdahl` is also on npm by its short name, so `npx amdahl ...` is the same as
+`npx @amdahl/cli ...`. That package ([packages/amdahl](packages/amdahl)) has no
+code of its own: it depends on `@amdahl/cli` at the same version and runs it.
 
 To connect an AI client, run `amdahl install claude-code` (or `codex`,
 `cursor`). It adds the Amdahl MCP server and also installs the Amdahl skill,
@@ -76,6 +82,7 @@ amdahl whoami                # the account, workspace and role you are signed in
 amdahl status                # can this workspace optimize, and what blocks it
 amdahl optimize draft.md     # rewrite one message (or pipe it in with -)
 amdahl install claude-code   # connect an AI client and add the Amdahl skill (also codex, cursor)
+amdahl skills add <publisher>/<skill>   # add a skill from amdahl.ai/skills to this project
 ```
 
 No workspace yet? `amdahl login` prints the console link where you can
@@ -98,10 +105,128 @@ amdahl keys list
 amdahl keys revoke <id|prefix> [--yes] [--no-browser]
 amdahl workspace list | amdahl workspace use <profile>
 amdahl install claude-code|codex|cursor [--print] [--force]
+amdahl skills add <publisher>/<skill> [-g] [--agents] [--force] [--site <origin>]
 ```
 
 Global flags: `--profile`, `--api-url`, `--api-key`, `--json`, `--no-color`,
 `-h`, `-v`. With `--json`, data goes to stdout and messages to stderr.
+
+## Skills
+
+`skills add` installs one skill from the library at https://amdahl.ai/skills.
+It needs no sign-in.
+
+```sh
+npx amdahl skills add <publisher>/<skill>
+# the skill's link works too, with or without .md:
+npx amdahl skills add https://amdahl.ai/skills/<publisher>/<skill>
+```
+
+In a terminal, it asks one question. It prints `Checking <publisher>/<skill>
+on amdahl.ai... OK` while it downloads and checks the skill. Then it names
+the skill and the agents it sees in use, and asks where to install it, in a
+menu:
+
+```
+System diagram, by Amdahl (17 files), for Claude Code and Cursor.
+Install it in:
+> This project (~/proj)
+  Every project on this computer
+(Use the arrow keys, then Enter)
+```
+
+Up and Down (or `k` and `j`) move the marker; typing `1` or `2` jumps to
+that row. Enter picks, and the menu shrinks to one line, such as
+`Install it in: This project (~/proj)`. The marked row is in the brand
+colour, or bold when colour is off (`--no-color`, `NO_COLOR`, `TERM=dumb`).
+The pick is the go-ahead: it installs, prints the folders it wrote, and
+says to open a new chat. In your home folder it does not ask, and installs
+for every project. Ctrl+C stops it with nothing written (exit 130).
+
+It never asks about agents. A `.claude` folder here or in your home folder,
+or `CLAUDECODE` set, means Claude Code (`.claude/skills`). A `.codex` folder
+means Codex, a `.cursor` folder or `CURSOR_AGENT` means Cursor, and an
+`.agents` folder means other agents (all `.agents/skills`). When it sees
+both kinds, or neither, it writes both folders. To choose yourself, use the
+flags below.
+
+If a different copy of the skill is already there, it asks once more, in
+the same kind of menu: "Keep your copy" (where the marker starts) or
+"Replace it". With `--force` it replaces it without asking.
+
+It never asks when stdin or stdout is not a terminal (an agent, CI, a pipe),
+or with `--json`, `-y`, `-g` or `--agents`, or with `AMDAHL_NO_PROMPT=1`.
+Then the flags say where. Without `--agents`, it uses the folder of the agent
+that ran it, when that agent says so: Claude Code sets `CLAUDECODE`
+(`.claude/skills`), Cursor sets `CURSOR_AGENT` (`.agents/skills`). Codex
+documents no such variable, so a run from Codex gets the default, Claude
+Code. Without flags it says on stderr where the skill went. `-y` (`--yes`)
+adds it to this project without asking. Neither replaces a different copy
+without `--force`.
+
+It reads the skill's index,
+`https://amdahl.ai/skills/<publisher>/<skill>/.well-known/agent-skills/index.json`
+([Agent Skills Discovery](https://schemas.agentskills.io/discovery/0.2.0/schema.json)
+v0.2.0). The index lists one of two kinds of skill:
+
+- `type: "skill-md"`: one SKILL.md. `skills add` downloads it.
+- `type: "archive"`: a folder (the SKILL.md plus scripts, references and
+  other files), as one `.tar.gz`. `skills add` downloads it and unpacks it
+  with its own reader. It never runs `tar`.
+
+It refuses the download, and writes nothing, unless all of these are true:
+
+- The index points at a file on the same site.
+- The sha256 of the downloaded bytes equals the index's `digest`. This is
+  checked before anything in an archive is read. The index and the file come
+  from the same site, so this only catches a corrupted or cut-off download.
+  It is not a signature and does not show the file is unchanged: that rests
+  on HTTPS and on who can publish to amdahl.ai/skills.
+- The SKILL.md front matter parses as YAML, `name` is a string, and
+  `description` is a string that is not empty.
+- `name` equals the skill's name in the index.
+
+An archive must also be a plain folder. `skills add` refuses it if:
+
+- the gzip CRC-32 or length does not match, or bytes follow the gzip data;
+- a tar header has a wrong checksum, is not ustar, or the tar has no end;
+- a path is absolute, holds `..`, `.` or an empty segment, a backslash or a
+  control character, or two entries share a path (also when only the
+  case differs);
+- an entry is not a file or a folder (a link, a device, a pax header);
+- a file mode is not 0644 or 0755;
+- it has more than 200 files, or more than 4 MB of file contents;
+- SKILL.md is not at its root.
+
+Without the questions, the flags say where it writes, and it prints each
+path it wrote:
+
+| flag | where |
+|---|---|
+| (none) or `-y` | `./.claude/skills/<name>/`, for Claude Code in this project |
+| `-g`, `--global` | `~/.claude/skills/<name>/`, for every project |
+| `--agents` | also `.agents/skills/<name>/` (in this project, or in `~` with `-g`), which Codex, Cursor and most other agents read |
+
+A `skill-md` skill writes `SKILL.md` in that folder, exactly as downloaded,
+through a temp file renamed into place. It refuses, even with `--force`, when
+the skill folder, the `skills` or `.claude`/`.agents` folder above it, or
+`SKILL.md` itself is a symbolic link, so it never writes outside that folder.
+An `archive` skill unpacks into a hidden temp folder beside each target,
+then renames it into place only when every target is complete. If any step
+fails, it removes what it unpacked and puts back any folder it replaced.
+
+If a different file or folder with that name is already there, `skills add`
+stops before it writes anything. Add `--force` to replace it. For a folder
+skill, `--force` replaces the whole folder, with any files you added to it.
+A skill that is already identical is left as it is.
+
+It sends two requests, both to amdahl.ai: the index, then the file. It
+follows no redirect and sends no telemetry. It waits at most 15 seconds for
+each request. It refuses an index over 256 KB, a SKILL.md over 64 KB (the
+most amdahl.ai accepts) and an archive over 4 MB. Each refusal writes
+nothing. `--site <origin>` sends both requests to another origin, for
+example a local copy of the site (`--site http://localhost:6782`). The
+origin must be `https`; `http` is allowed only for localhost.
 
 ## Targeting staging
 
@@ -141,7 +266,7 @@ code shown in the terminal; then the key is printed once and stored nowhere.
 | code | meaning |
 |---|---|
 | 0 | ok |
-| 1 | general (`login_timeout`, `state_mismatch`, optimize `ok: false`) |
+| 1 | general (`login_timeout`, `state_mismatch`, optimize `ok: false`, a `skills add` refusal) |
 | 2 | usage |
 | 3 | not signed in (401, `invalid_grant`, no credential) |
 | 4 | forbidden (403, `oauth_required`, `cli_client_required`, `not_admin`) |
@@ -149,6 +274,7 @@ code shown in the terminal; then the key is printed once and stored nowhere.
 | 6 | rate limited or quota (429) |
 | 7 | approval denied, expired or locked out |
 | 8 | network or 5xx |
+| 130 | stopped with Ctrl+C at a question (nothing was written) |
 
 ## Development
 
@@ -160,7 +286,7 @@ pnpm install
 pnpm build         # dist/amdahl.js, one file, no runtime deps
 pnpm test          # vitest, against a local mock server
 pnpm type-check
-pnpm smoke:pack    # pack, install offline, run --version
+pnpm smoke:pack    # pack both packages, install offline, run --help and --version
 pnpm sync:skill    # refresh skill/SKILL.md from docs.amdahl.ai (and skill/shipped.json), then commit both
 ```
 
@@ -171,9 +297,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues as described in
 
 `.github/workflows/publish.yml` publishes to npm. To release:
 
-1. In a PR, bump the version in `package.json` and `src/version.ts` together.
-   The workflow refuses a version that does not match both, or one that is
-   already on npm.
+1. In a PR, bump the version in `package.json` and `src/version.ts` together,
+   and in `packages/amdahl/package.json` both its `version` and its
+   `@amdahl/cli` dependency. The workflow refuses a version that does not
+   match the first two, or one that is already on npm; a test checks the third.
 2. After it merges, push a tag `cli-v<version>` (for example `cli-v0.2.0`). A
    version with a `-` (for example `0.2.0-rc.1`) goes to the `next` dist-tag;
    anything else goes to `latest`.
@@ -189,3 +316,26 @@ the `npm` environment, so no long-lived npm token is needed. Every release
 carries a signed [provenance attestation](https://docs.npmjs.com/generating-provenance-statements)
 that links the package on npm to the commit and workflow run that built it.
 Check it with `npm audit signatures` or on the package page on npmjs.com.
+
+The workflow publishes `amdahl` (the short name) right after `@amdahl/cli`,
+from the same run, only when the repository variable `NPM_PUBLISH_AMDAHL` is
+`true`. Amdahl already holds the `amdahl` name on npm (a 0.0.1 placeholder
+with no bin), so trusted publishing can be set up for it now. Before you push
+the tag:
+
+1. On npmjs.com, `amdahl`, Settings, add a trusted publisher: GitHub Actions,
+   `amdahlco/amdahl-cli`, workflow `publish.yml`, environment `npm`.
+2. Set the repository variable `NPM_PUBLISH_AMDAHL` to `true`.
+
+Then each `cli-v<version>` tag publishes both packages from CI, both with
+provenance. Each publish step skips a version already on npm, so if the
+`amdahl` step fails, use **Re-run failed jobs** on that run. (Re-running every
+job stops at the check that the version is not on npm yet.)
+
+Only if CI cannot publish `amdahl`, publish it by hand as a fallback: download
+the `tarball` artifact from the run (it holds `amdahl-<version>.tgz`, already
+checked), then, as an owner of the `amdahl` npm org with 2FA, run
+`npm publish amdahl-<version>.tgz --access public --provenance=false`.
+`publishConfig` asks for provenance, which a laptop cannot give, so without
+`--provenance=false` the publish is expected to fail. That version has no
+provenance.

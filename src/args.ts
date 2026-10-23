@@ -50,6 +50,13 @@ const COMMAND_OPTIONS: Record<string, OptionSpec> = {
   'workspace list': {},
   'workspace use': {},
   install: { print: { type: 'boolean' }, force: { type: 'boolean' } },
+  'skills add': {
+    yes: { type: 'boolean', short: 'y' },
+    global: { type: 'boolean', short: 'g' },
+    agents: { type: 'boolean' },
+    force: { type: 'boolean' },
+    site: { type: 'string' },
+  },
 }
 
 /** Aliases onto canonical command names. */
@@ -60,7 +67,7 @@ const ALIASES: Record<string, string> = {
 }
 
 /** Every command that takes one or two words. */
-const TWO_WORD = new Set(['auth', 'keys', 'workspace'])
+const TWO_WORD = new Set(['auth', 'keys', 'workspace', 'skills'])
 
 /** The parsed command line. */
 export interface ParsedArgs {
@@ -100,6 +107,14 @@ export function parseCommandLine(argv: string[]): ParsedArgs {
   let name = first
   if (TWO_WORD.has(first)) {
     const second = positionals[1]
+    if (first === 'skills' && second !== 'add') {
+      // `amdahl skills` or `amdahl skills <publisher>/<skill>`: point at the one skills command.
+      const ref = second && second.includes('/') ? second : '<publisher>/<skill>'
+      throw usageError(
+        second === undefined ? '`amdahl skills` needs a subcommand.' : `Unknown command \`amdahl skills ${second}\`.`,
+        `To add a skill: npx amdahl skills add ${ref}`
+      )
+    }
     if (second === undefined) throw usageError(`\`amdahl ${first}\` needs a subcommand.`)
     name = `${first} ${second}`
     words = 2
@@ -132,6 +147,9 @@ What you can do:
   amdahl status                  Check that this workspace is set up to optimize
   amdahl keys create --name ci   Make an API key for a server or CI
   amdahl install claude-code     Connect your AI client (also codex, cursor)
+  amdahl skills add <publisher>/<skill>
+                                 Add a skill from https://amdahl.ai/skills to this project:
+                                 its SKILL.md, or its whole folder
   For everything Amdahl can do: https://docs.amdahl.ai/skills/amdahl/SKILL.md
 
 Commands:
@@ -147,6 +165,12 @@ Commands:
   keys revoke <id|prefix> [--yes] [--no-browser]
   workspace list | workspace use <profile>
   install claude-code|codex|cursor [--print] [--force]
+  skills add <publisher>/<skill> [-y] [-g] [--agents] [--force] [--site <origin>]
+           In a terminal it asks one question: this project (Enter) or every project.
+           -y        add without asking, to this project
+           -g        every project (~/.claude/skills), not just this one
+           --agents  also .agents/skills, for Codex, Cursor and other agents
+           --force   replace a different copy of the skill already there
 
 Global options:
   --profile <name>   Use a saved profile (default: AMDAHL_PROFILE, then the default profile)

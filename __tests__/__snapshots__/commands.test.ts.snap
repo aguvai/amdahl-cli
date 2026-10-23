@@ -8,6 +8,9 @@ What you can do:
   amdahl status                  Check that this workspace is set up to optimize
   amdahl keys create --name ci   Make an API key for a server or CI
   amdahl install claude-code     Connect your AI client (also codex, cursor)
+  amdahl skills add <publisher>/<skill>
+                                 Add a skill from https://amdahl.ai/skills to this project:
+                                 its SKILL.md, or its whole folder
   For everything Amdahl can do: https://docs.amdahl.ai/skills/amdahl/SKILL.md
 
 Commands:
@@ -23,6 +26,12 @@ Commands:
   keys revoke <id|prefix> [--yes] [--no-browser]
   workspace list | workspace use <profile>
   install claude-code|codex|cursor [--print] [--force]
+  skills add <publisher>/<skill> [-y] [-g] [--agents] [--force] [--site <origin>]
+           In a terminal it asks one question: this project (Enter) or every project.
+           -y        add without asking, to this project
+           -g        every project (~/.claude/skills), not just this one
+           --agents  also .agents/skills, for Codex, Cursor and other agents
+           --force   replace a different copy of the skill already there
 
 Global options:
   --profile <name>   Use a saved profile (default: AMDAHL_PROFILE, then the default profile)

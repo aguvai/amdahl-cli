@@ -15,6 +15,7 @@ export const EXIT = {
   rateLimited: 6,
   denied: 7,
   network: 8,
+  cancelled: 130,
 } as const
 
 /** One of the {@link EXIT} values. */
@@ -29,13 +30,16 @@ export class CliError extends Error {
   readonly code: string
   readonly exit: ExitCode
   readonly hint?: string
+  /** Technical detail for `--json` only, kept out of the plain message. */
+  readonly detail?: string
 
-  constructor(code: string, message: string, exit: ExitCode, hint?: string) {
+  constructor(code: string, message: string, exit: ExitCode, hint?: string, detail?: string) {
     super(message)
     this.name = 'CliError'
     this.code = code
     this.exit = exit
     this.hint = hint
+    this.detail = detail
   }
 }
 

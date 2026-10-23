@@ -1,12 +1,12 @@
-// A fake process boundary: captured output, a temp config home, a spy on
-// spawned processes, and a "browser" that follows the authorize redirect to
+// A fake process boundary: captured output, a temp config home (with a
+// `project` folder as the working directory), a spy on spawned processes, and a "browser" that follows the authorize redirect to
 // the CLI's loopback listener the way a signed-in browser would.
 
-import { mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { vi } from 'vitest'
-import type { Io, ProcessResult } from '../../src/io'
+import { PromptCancelled, type Io, type ProcessResult } from '../../src/io'
 import { runCli } from '../../src/main'
 
 export interface FakeIo extends Io {
@@ -14,7 +14,12 @@ export interface FakeIo extends Io {
   err: string[]
   opened: string[]
   stdinText: string
-  answers: string[]
+  /** What each prompt answers, in order; null stands for Ctrl+C. */
+  answers: (string | null)[]
+  /** Every question asked; a menu is `<question> [<choice> | <choice>]`. */
+  prompts: string[]
+  /** Whether each menu was asked for colour. */
+  selectColor: boolean[]
   run: Io['run'] & ReturnType<typeof vi.fn>
 }
 
@@ -28,30 +33,52 @@ export async function followAuthorize(url: string): Promise<void> {
 
 export function fakeIo(env: Record<string, string | undefined> = {}, home?: string): FakeIo {
   const dir = home ?? mkdtempSync(join(tmpdir(), 'amdahl-cli-test-'))
+  const cwd = join(dir, 'project')
+  mkdirSync(cwd, { recursive: true })
   const io: FakeIo = {
     out: [],
     err: [],
     opened: [],
     stdinText: '',
     answers: [],
+    prompts: [],
     env: { XDG_CONFIG_HOME: join(dir, 'config'), AMDAHL_CREDENTIAL_STORE: 'file', ...env },
     stdout: (t) => void io.out.push(t),
     stderr: (t) => void io.err.push(t),
     stdinIsTTY: true,
+    stdoutIsTTY: false,
     stderrIsTTY: false,
     readStdin: async () => io.stdinText,
-    prompt: async () => io.answers.shift() ?? '',
+    prompt: async (question) => {
+      io.prompts.push(question)
+      const answer = io.answers.shift()
+      if (answer === null) throw new PromptCancelled()
+      return answer ?? ''
+    },
+    // A menu answers from the same queue: '' picks the start row, a number picks that row, null is Ctrl+C.
+    select: async (question, choices, options) => {
+      io.prompts.push(`${question} [${choices.join(' | ')}]`)
+      io.selectColor.push(options?.color === true)
+      const answer = io.answers.shift()
+      if (answer === null) throw new PromptCancelled()
+      const n = Number(answer)
+      return answer && Number.isInteger(n) && n >= 1 && n <= choices.length ? n - 1 : (options?.initial ?? 0)
+    },
+    selectColor: [],
+    uninterruptible: (fn) => fn(),
     run: vi.fn(async (): Promise<ProcessResult> => ({ code: -1, stdout: '', stderr: 'not found' })),
     openUrl: async (url) => {
       io.opened.push(url)
       await followAuthorize(url)
     },
     homedir: dir,
+    cwd,
     platform: 'linux',
     hostname: 'test-host',
     now: () => Date.now(),
     sleep: async () => {},
     loginTimeoutMs: 3000,
+    fetchTimeoutMs: 100,
   }
   return io
 }
