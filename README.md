@@ -105,7 +105,7 @@ amdahl keys list
 amdahl keys revoke <id|prefix> [--yes] [--no-browser]
 amdahl workspace list | amdahl workspace use <profile>
 amdahl install claude-code|codex|cursor [--print] [--force]
-amdahl skills add <publisher>/<skill> [-g] [--agents] [--force] [--site <origin>]
+amdahl skills add <publisher>/<skill> [-g] [--agents] [--force] [--accept-warning] [--site <origin>]
 ```
 
 Global flags: `--profile`, `--api-url`, `--api-key`, `--json`, `--no-color`,
@@ -163,6 +163,33 @@ documents no such variable, so a run from Codex gets the default, Claude
 Code. Without flags it says on stderr where the skill went. `-y` (`--yes`)
 adds it to this project without asking. Neither replaces a different copy
 without `--force`.
+
+amdahl.ai's AI security review flags some skills. A flagged skill's index
+entry carries an `x-amdahl-warning` field. `skills add` prints it before it
+writes anything: the skill, the sentence from the skill page, and the page's
+link.
+
+```
+Warning: amdahl.ai's security review flagged amdahl/call-prep.
+  Flagged: it may send your data somewhere else (line 14), and 2 more. Read it before you install.
+  See what was flagged: https://amdahl.ai/skills/amdahl/call-prep
+```
+
+In a terminal, it then asks `Install this skill?` in the same kind of menu.
+The marker starts on "Cancel", which writes nothing and exits 0. "Install
+anyway" goes on as usual. With `-y`, `--json` or no terminal, it does not
+install the skill. It says to show the warning to the person, and exits 9.
+Once they agree, run the same command again with `--accept-warning`: it
+prints the warning and installs. With `--json`, the result or the refusal
+carries the warning as `warning`, with `result`, `flagged`, `line`, `text`
+and `page`.
+
+It treats every field of the warning as untrusted. It prints the sentence
+only with control, escape and format characters removed, and cuts it at 300
+characters. It keeps `line` only as a positive integer, and `flagged` only as
+a plain id. When the field is not an object, its `result` is not `warn` or
+`fail`, or it has no sentence, `skills add` installs as it would with no
+warning, and prints one dim line that says it could not read the warning.
 
 It reads the skill's index,
 `https://amdahl.ai/skills/<publisher>/<skill>/.well-known/agent-skills/index.json`
@@ -274,6 +301,7 @@ code shown in the terminal; then the key is printed once and stored nowhere.
 | 6 | rate limited or quota (429) |
 | 7 | approval denied, expired or locked out |
 | 8 | network or 5xx |
+| 9 | `skills add` did not install a skill amdahl.ai's security review flagged: no terminal to ask, or `-y` or `--json`, and no `--accept-warning` (nothing was written) |
 | 130 | stopped with Ctrl+C at a question (nothing was written) |
 
 ## Development

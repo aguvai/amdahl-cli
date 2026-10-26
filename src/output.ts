@@ -34,6 +34,8 @@ export interface Output {
   event: (data: Record<string, unknown>) => void
   /** Bold text when colour is allowed. */
   bold: (text: string) => string
+  /** Dim text when colour is allowed. */
+  dim: (text: string) => string
 }
 
 /**
@@ -63,6 +65,9 @@ export function createOutput(io: Io, json: boolean, noColor: boolean): Output {
     },
     bold(text) {
       return color ? `\u001b[1m${text}\u001b[22m` : text
+    },
+    dim(text) {
+      return color ? `\u001b[2m${text}\u001b[22m` : text
     },
   }
 }
