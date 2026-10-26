@@ -28,7 +28,7 @@ import { printable } from '../output'
 import { ArchiveError, readSkillArchive, type SkillArchive } from '../tar-gz'
 import { agentsInUse, guide, nextStep, runningAgent, shouldGuide, skillsFolders, type SkillSummary } from './skills-guide'
 import { planInstall, refuseClashes, skillDirs, writeInstall, type FilePlan, type Payload, type Targets } from './skills-install'
-import { WARNING_FIELD, confirmWarning, readWarning, unreadableWarning, warningJson, type SkillWarning } from './skills-warning'
+import { WARNING_FIELD, confirmWarning, readWarning, warningJson, type SkillWarning } from './skills-warning'
 
 /** Where the skills library is published. */
 export const DEFAULT_SKILLS_SITE = 'https://amdahl.ai'
@@ -177,8 +177,8 @@ export interface IndexEntry {
   sha256: string
   description: string
   version?: string
-  /** The security review's warning, checked; `unreadable` when the field is there but could not be read. */
-  warning?: SkillWarning | 'unreadable'
+  /** The security review's warning, checked (UNREADABLE_WARNING when the field is there but could not be read). */
+  warning?: SkillWarning
 }
 
 /**
@@ -350,8 +350,7 @@ export async function skillsAdd(ctx: Ctx, args: string[]): Promise<number> {
   const { url, sha256 } = entry
 
   // A flagged skill: the warning is shown before any question or write, and only a yes goes on.
-  const warning = entry.warning === 'unreadable' ? undefined : entry.warning
-  if (entry.warning === 'unreadable') unreadableWarning(ctx, ref, site)
+  const { warning } = entry
   if (warning) {
     if (!(await confirmWarning(ctx, ref, site, warning))) return EXIT.ok
     if (guided) ctx.out.info('')

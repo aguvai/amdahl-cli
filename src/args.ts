@@ -175,7 +175,8 @@ Commands:
            --accept-warning
                      install a skill that amdahl.ai's security review flagged,
                      after printing the warning. Without it, a terminal asks
-                     (Cancel or Install anyway); -y or no terminal stops (exit 9)
+                     (Cancel or Install anyway); -y, --json or no terminal
+                     stops (exit 9)
 
 Global options:
   --profile <name>   Use a saved profile (default: AMDAHL_PROFILE, then the default profile)

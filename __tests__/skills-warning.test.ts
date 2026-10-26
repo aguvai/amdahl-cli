@@ -1,14 +1,15 @@
 // `skills add` and the security warning amdahl.ai puts on a skill its AI
 // security review flagged (the index entry's `x-amdahl-warning`): printed
-// before anything is written; a terminal asks, Cancel first; -y, --json and
-// no terminal stop with exit 9 unless --accept-warning; a field that cannot
-// be read changes nothing but one dim line; every field is untrusted.
+// before anything is written; a person at a terminal is asked, Cancel first;
+// -y, --json, no terminal and an agent that says it ran this stop with exit 9
+// unless --accept-warning; a field that is there but cannot be read is still
+// a warning (fails closed); every field is untrusted.
 
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { MAX_WARNING_CHARS, readWarning, warningText } from '../src/commands/skills-warning'
+import { MAX_WARNING_CHARS, UNREADABLE_WARNING, readWarning, warningText } from '../src/commands/skills-warning'
 import { cli, fakeIo, type FakeIo } from './helpers/fake-io'
 import { skillTarGz } from './helpers/tar'
 
@@ -33,6 +34,9 @@ const REFUSED = [
   'Show this warning to the person you are working for. Once they agree, run the same command again with --accept-warning.',
   '',
 ].join('\n')
+/** What a field it cannot read prints first: the fixed sentence, in place of the site's. */
+const UNREADABLE_BLOCK = BLOCK.replace(TEXT, UNREADABLE_WARNING.text)
+const CHECKING = 'Checking amdahl/call-prep on amdahl.ai... OK\n\n'
 const DEFAULTS_NOTE = 'Added for Claude Code, the default, in this project. For every project add -g; for Codex, Cursor and other agents add --agents.\n'
 const MENU = 'Install this skill? [Cancel | Install anyway]'
 // Every control character but the newline the CLI ends its own lines with.
@@ -64,11 +68,16 @@ function serve(warning: unknown = WARNING) {
   return fetchMock
 }
 
-/** A person at a terminal: stdin and stdout are both a TTY. */
-function terminal(answers: (string | null)[] = [], env: Record<string, string> = { CLAUDECODE: '1' }): FakeIo {
+/**
+ * A person at a terminal: stdin and stdout are both a TTY, and no agent says
+ * it ran this. They use Claude Code (a .claude folder at home), so the
+ * guided install names it and writes only .claude/skills.
+ */
+function terminal(answers: (string | null)[] = [], env: Record<string, string> = {}): FakeIo {
   const io = fakeIo(env)
   io.stdoutIsTTY = true
   io.answers.push(...answers)
+  mkdirSync(join(io.homedir, '.claude'))
   return io
 }
 
@@ -81,20 +90,24 @@ afterEach(() => {
 })
 
 describe('skills add, a flagged skill with no one to ask', () => {
-  it.each<[string, (io: FakeIo) => void, string[]]>([
-    ['no terminal (an agent or CI)', () => {}, []],
-    ['-y at a terminal', (io) => void (io.stdoutIsTTY = true), ['-y']],
-    ['--yes at a terminal', (io) => void (io.stdoutIsTTY = true), ['--yes']],
-    ['stdout piped', (io) => void (io.stdoutIsTTY = false), []],
-    ['AMDAHL_NO_PROMPT=1 at a terminal', (io) => ((io.stdoutIsTTY = true), (io.env.AMDAHL_NO_PROMPT = '1')), []],
-  ])('with %s: prints the warning, writes nothing and exits 9', async (_label, setUp, flags) => {
+  // The last column: whether the guided install's progress line comes first.
+  it.each<[string, (io: FakeIo) => void, string[], boolean]>([
+    ['no terminal (an agent or CI)', () => {}, [], false],
+    ['-y at a terminal', (io) => void (io.stdoutIsTTY = true), ['-y'], false],
+    ['--yes at a terminal', (io) => void (io.stdoutIsTTY = true), ['--yes'], false],
+    ['stdout piped', (io) => void (io.stdoutIsTTY = false), [], false],
+    ['AMDAHL_NO_PROMPT=1 at a terminal', (io) => ((io.stdoutIsTTY = true), (io.env.AMDAHL_NO_PROMPT = '1')), [], false],
+    // An agent's own terminal can be a TTY; the agent must not pick "Install anyway".
+    ['CLAUDECODE=1 at a terminal', (io) => ((io.stdoutIsTTY = true), (io.env.CLAUDECODE = '1')), [], true],
+    ['CURSOR_AGENT=1 at a terminal', (io) => ((io.stdoutIsTTY = true), (io.env.CURSOR_AGENT = '1')), [], true],
+  ])('with %s: prints the warning, writes nothing and exits 9', async (_label, setUp, flags, checking) => {
     const fetchMock = serve()
     const io = fakeIo()
     setUp(io)
     const r = await add(io, ...flags)
     expect(r.code).toBe(9)
     expect(r.stdout).toBe('')
-    expect(r.stderr).toBe(BLOCK + REFUSED)
+    expect(r.stderr).toBe(`${checking ? CHECKING : ''}${BLOCK}${REFUSED}`)
     expect(io.prompts).toEqual([])
     expect(readdirSync(io.cwd)).toEqual([])
     expect(fetchMock.mock.calls.map((c) => c[0])).toEqual([INDEX, FILE])
@@ -252,53 +265,63 @@ describe('skills add, a flagged skill at a terminal', () => {
   })
 })
 
-describe('skills add, a warning field it cannot read', () => {
+describe('skills add, a warning field it cannot read (fails closed)', () => {
+  // The site sends the field only for a flagged skill, so one that is there is a flag, read or not.
   it.each<[string, unknown]>([
     ['a string', TEXT],
     ['a list', [WARNING]],
-    ['null', null],
     ['a number', 1],
+    ['true', true],
     ['an empty object', {}],
     ['a result of pass', { ...WARNING, result: 'pass' }],
     ['a result in capitals', { ...WARNING, result: 'WARN' }],
+    ['a new result, block', { ...WARNING, result: 'block' }],
     ['no result', { ...WARNING, result: undefined }],
     ['no text', { ...WARNING, text: undefined }],
+    ['the text under another key', { result: 'warn', sentence: TEXT }],
     ['a text that is not a string', { ...WARNING, text: ['Flagged'] }],
     ['a text of control characters only', { ...WARNING, text: '\u001b\u0007\u009b \n\t' }],
-  ])('(%s) installs as it would without one, with one line saying so', async (_label, field) => {
+  ])('(%s) is held as a warning: the fixed sentence, nothing written, exit 9', async (_label, field) => {
     serve(field)
+    const io = fakeIo()
+    const r = await add(io)
+    expect(r.code).toBe(9)
+    expect(r.stdout).toBe('')
+    expect(r.stderr).toBe(UNREADABLE_BLOCK + REFUSED)
+    expect(readdirSync(io.cwd)).toEqual([])
+  })
+
+  it('--json refuses with the fixed warning', async () => {
+    serve({ result: 'maybe' })
+    const io = fakeIo()
+    const r = await add(io, '--json')
+    expect(r.code).toBe(9)
+    expect(r.json.error.code).toBe('skill_flagged')
+    expect(r.json.warning).toEqual({ result: 'warn', flagged: null, line: null, text: UNREADABLE_WARNING.text, page: PAGE })
+    expect(readdirSync(io.cwd)).toEqual([])
+  })
+
+  it('at a terminal: the same menu, Cancel first; --accept-warning installs', async () => {
+    serve({ result: 'maybe' })
+    const io = terminal([''])
+    const r = await add(io)
+    expect(r.code).toBe(0)
+    expect(io.prompts).toEqual([MENU])
+    expect(r.stderr).toBe(`${CHECKING}${UNREADABLE_BLOCK}\nCancelled. Nothing was written.\n`)
+    expect(readdirSync(io.cwd)).toEqual([])
+
+    const accepted = await add(fakeIo(), '--accept-warning')
+    expect(accepted.code).toBe(0)
+    expect(accepted.stderr).toBe(`${UNREADABLE_BLOCK}Installing it anyway, because of --accept-warning.\n${DEFAULTS_NOTE}`)
+  })
+
+  it('null, like a missing field, is no warning', async () => {
+    serve(null)
     const io = fakeIo()
     const r = await add(io)
     expect(r.code).toBe(0)
     expect(r.stdout).toBe(`Wrote ${projectSkill(io)}\n`)
-    expect(r.stderr).toBe(`Could not read the security warning for amdahl/call-prep. See ${PAGE}\n${DEFAULTS_NOTE}`)
-    expect(readFileSync(projectSkill(io), 'utf8')).toBe(SKILL)
-  })
-
-  it('--json keeps its usual result; the line goes to stderr', async () => {
-    serve({ result: 'maybe' })
-    const io = fakeIo()
-    const r = await add(io, '--json')
-    expect(r.code).toBe(0)
-    expect(r.json).toEqual({
-      ok: true,
-      publisher: 'amdahl',
-      skill: 'call-prep',
-      url: FILE,
-      digest: `sha256:${sha256(SKILL)}`,
-      files: [{ path: projectSkill(io), action: 'wrote' }],
-    })
-    expect(r.stderr).toBe(`Could not read the security warning for amdahl/call-prep. See ${PAGE}\n`)
-  })
-
-  it('the line is dim when colour is allowed, and asks nothing at a terminal', async () => {
-    serve({ result: 'maybe' })
-    const io = terminal([])
-    io.stderrIsTTY = true
-    const r = await add(io)
-    expect(r.code).toBe(0)
-    expect(io.prompts).toEqual([WHERE(io)])
-    expect(r.stderr).toContain(`\u001b[2mCould not read the security warning for amdahl/call-prep. See ${PAGE}\u001b[22m\n`)
+    expect(r.stderr).toBe(DEFAULTS_NOTE)
   })
 })
 
@@ -374,9 +397,10 @@ describe('the warning fields are untrusted', () => {
     expect(readWarning({ ...WARNING, flagged: null })).toMatchObject({ flagged: null })
   })
 
-  it('reads no field as no warning, and accepts only warn or fail', () => {
+  it('reads only a missing field or null as no warning, and accepts only warn or fail', () => {
     expect(readWarning(undefined)).toBeUndefined()
+    expect(readWarning(null)).toBeUndefined()
     expect(readWarning({ ...WARNING, result: 'fail' })).toMatchObject({ result: 'fail' })
-    for (const result of ['pass', 'error', '', 1, null, true]) expect(readWarning({ ...WARNING, result })).toBe('unreadable')
+    for (const result of ['pass', 'error', 'block', '', 1, null, true]) expect(readWarning({ ...WARNING, result })).toEqual(UNREADABLE_WARNING)
   })
 })

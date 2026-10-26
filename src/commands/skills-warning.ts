@@ -7,22 +7,28 @@
 // (line 14), and 2 more. Read it before you install."). The site builds it
 // from fixed labels and a line number only. Still, every field is read as
 // untrusted: `result` must be `warn` or `fail`; `text` must be a string, and
-// is printed only with every control, format and line-break character
-// removed and cut to 300 characters; `line` is kept only as a positive
-// integer. A field that fails those checks is not a warning: `skills add`
-// goes on as it would without one, and says in one dim line that it could
-// not read it.
+// is printed only with line breaks turned into spaces, every control and
+// format character removed, and cut to 300 characters; `line` is kept only
+// as a positive integer.
+//
+// The site sends the field only for a flagged skill, so a field that is
+// there means flagged, even when this version cannot read it (a new
+// `result`, the sentence under another key). Such a field FAILS CLOSED: it
+// becomes a fixed warning (UNREADABLE_WARNING) that is held exactly like a
+// readable one. Only a missing field, or null, means no warning.
 //
 // A warning is printed before anything is written: the skill, the sentence
 // and the skill page. Then `--accept-warning` installs. A person at a
-// terminal (no -y, no --json) picks in a menu that starts on Cancel, which
-// writes nothing and exits 0. Anything else stops with exit 9
-// (EXIT.flagged) and says to show the warning to the person first.
+// terminal (no -y, no --json, and no agent that says it ran this) picks in a
+// menu that starts on Cancel, which writes nothing and exits 0. Anything
+// else stops with exit 9 (EXIT.flagged) and says to show the warning to the
+// person first.
 
 import type { Ctx } from '../context'
 import { CliError, EXIT } from '../errors'
 import { PromptCancelled } from '../io'
 import type { SkillRef } from './skills'
+import { runningAgent } from './skills-guide'
 
 /** The index entry field that carries the warning. */
 export const WARNING_FIELD = 'x-amdahl-warning'
@@ -60,19 +66,27 @@ export function warningText(raw: string): string {
   return `${chars.slice(0, MAX_WARNING_CHARS - 3).join('').trimEnd()}...`
 }
 
+/** The warning for a field that is there but that this version cannot read: still a warning, held the same way. */
+export const UNREADABLE_WARNING: Readonly<SkillWarning> = Object.freeze({
+  result: 'warn',
+  flagged: null,
+  line: null,
+  text: 'amdahl.ai flagged this skill. This version of the CLI could not read why.',
+})
+
 /**
- * Read the entry's warning field: undefined when there is none, the
- * checked warning, or `unreadable` when the field is there but is not a
- * warning this can show (not an object, a `result` other than warn or
- * fail, or no sentence left to print).
+ * Read the entry's warning field: undefined when there is none (missing,
+ * or null), else the checked warning. A field that is not a warning this
+ * can show (not an object, a `result` other than warn or fail, or no
+ * sentence left to print) is UNREADABLE_WARNING, never no warning.
  */
-export function readWarning(raw: unknown): SkillWarning | 'unreadable' | undefined {
-  if (raw === undefined) return undefined
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return 'unreadable'
+export function readWarning(raw: unknown): SkillWarning | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (typeof raw !== 'object' || Array.isArray(raw)) return { ...UNREADABLE_WARNING }
   const { result, flagged, line, text } = raw as Record<string, unknown>
-  if (result !== 'warn' && result !== 'fail') return 'unreadable'
+  if (result !== 'warn' && result !== 'fail') return { ...UNREADABLE_WARNING }
   const sentence = typeof text === 'string' ? warningText(text) : ''
-  if (!sentence) return 'unreadable'
+  if (!sentence) return { ...UNREADABLE_WARNING }
   return {
     result,
     flagged: typeof flagged === 'string' && CHECK_ID_RE.test(flagged) ? flagged : null,
@@ -91,14 +105,13 @@ export function warningJson(warning: SkillWarning, site: string, ref: SkillRef):
   return { ...warning, page: skillPage(site, ref) }
 }
 
-/** The one dim line for a warning field that could not be read. */
-export function unreadableWarning(ctx: Ctx, ref: SkillRef, site: string): void {
-  ctx.out.info(ctx.out.dim(`Could not read the security warning for ${ref.publisher}/${ref.skill}. See ${skillPage(site, ref)}`))
-}
-
-/** True when a person can answer the menu: a terminal, and no -y or --json. */
+/**
+ * True when a person can answer the menu: a terminal, no -y or --json, and
+ * no agent that says it ran this (an agent's own terminal can be a TTY, and
+ * an agent must not pick "Install anyway" for the person).
+ */
 function canAsk(ctx: Ctx): boolean {
-  return !ctx.nonInteractive && ctx.io.stdoutIsTTY && !ctx.out.json && ctx.flags.yes !== true
+  return !ctx.nonInteractive && ctx.io.stdoutIsTTY && !ctx.out.json && ctx.flags.yes !== true && runningAgent(ctx) === null
 }
 
 /**

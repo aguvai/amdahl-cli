@@ -178,18 +178,24 @@ Warning: amdahl.ai's security review flagged amdahl/call-prep.
 In a terminal, it then asks `Install this skill?` in the same kind of menu.
 The marker starts on "Cancel", which writes nothing and exits 0. "Install
 anyway" goes on as usual. With `-y`, `--json` or no terminal, it does not
-install the skill. It says to show the warning to the person, and exits 9.
-Once they agree, run the same command again with `--accept-warning`: it
-prints the warning and installs. With `--json`, the result or the refusal
+install the skill. It does not ask an agent either, even in a terminal: when
+`CLAUDECODE` or `CURSOR_AGENT` is set, it does not install. It says to show
+the warning to the person, and exits 9. Once they agree, run the same
+command again with `--accept-warning`: it prints the warning and installs. With `--json`, the result or the refusal
 carries the warning as `warning`, with `result`, `flagged`, `line`, `text`
 and `page`.
 
-It treats every field of the warning as untrusted. It prints the sentence
-only with control, escape and format characters removed, and cuts it at 300
-characters. It keeps `line` only as a positive integer, and `flagged` only as
-a plain id. When the field is not an object, its `result` is not `warn` or
-`fail`, or it has no sentence, `skills add` installs as it would with no
-warning, and prints one dim line that says it could not read the warning.
+It treats every field of the warning as untrusted. It turns line breaks in
+the sentence into spaces, removes control, escape and format characters, and
+cuts the sentence at 300 characters. It keeps `line` only as a positive
+integer, and `flagged` only as a plain id.
+
+The site sends the field only for a flagged skill. So when the field is
+there but `skills add` cannot read it (it is not an object, its `result` is
+not `warn` or `fail`, or it has no sentence), the skill is still flagged. It
+prints the sentence "amdahl.ai flagged this skill. This version of the CLI
+could not read why." and holds the install the same way. Only a missing
+field, or `null`, means no warning.
 
 It reads the skill's index,
 `https://amdahl.ai/skills/<publisher>/<skill>/.well-known/agent-skills/index.json`
@@ -301,7 +307,7 @@ code shown in the terminal; then the key is printed once and stored nowhere.
 | 6 | rate limited or quota (429) |
 | 7 | approval denied, expired or locked out |
 | 8 | network or 5xx |
-| 9 | `skills add` did not install a skill amdahl.ai's security review flagged: no terminal to ask, or `-y` or `--json`, and no `--accept-warning` (nothing was written) |
+| 9 | `skills add` did not install a skill amdahl.ai's security review flagged: no terminal to ask, `-y`, `--json` or an agent ran it, and no `--accept-warning` (nothing was written) |
 | 130 | stopped with Ctrl+C at a question (nothing was written) |
 
 ## Development
