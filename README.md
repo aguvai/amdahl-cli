@@ -840,7 +840,9 @@ Added 38 to "Q4 founders" in Instantly. 0 skipped (already in the campaign), 0 f
   adds and the first one, then asks. `--yes` adds without asking, for a
   script. With no terminal and no `--yes`, nothing is added (exit 2).
 - **Size:** up to 100 leads go in one call, and up to 1,000 in one command.
-  Running the same command again adds nothing twice.
+  Running the same command again adds nothing twice. If a later call is
+  refused (someone started the campaign, say), the error says how many leads
+  the earlier calls already added, and `--json` carries their `counts`.
 - **Permission:** it needs `sequencers:push`. A sign-in made with this version
   has it (run `amdahl login` again if yours is older). An API key has it only
   when it was created with **Add leads to sequencer campaigns**.

@@ -136,6 +136,8 @@ export interface MockOptions {
   batchResults?: (item: Record<string, unknown>, index: number) => { status: string; result: Record<string, unknown> | null } | undefined
   /** Connected sequencers, listed after the connections; their campaigns are SEQUENCER_CAMPAIGNS. */
   sequencers?: { id: string; type: string; name: string }[]
+  /** After this many pushes, a push answers 409 campaign_active, as when someone starts the campaign mid-command. */
+  pushesBeforeLive?: number
 }
 
 /** Every sequencer's campaigns in the mock, as `GET /connections/:id/campaigns` returns them. */
@@ -462,7 +464,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
           const campaign = SEQUENCER_CAMPAIGNS.find((c) => c.id === sub)
           if (!campaign) return err(res, 404, 'not_found', 'Campaign not found.')
           if (!Array.isArray(input.leads) || input.leads.length === 0 || input.leads.length > 100) return err(res, 400, 'too_many_leads', 'An API key or an agent can add up to 100 leads in one call.')
-          if (campaign.status === 'active') return err(res, 409, 'campaign_active', 'This campaign is live.')
+          if (campaign.status === 'active' || (options.pushesBeforeLive !== undefined && pushes.length >= options.pushesBeforeLive)) return err(res, 409, 'campaign_active', 'This campaign is live.')
           const known = pushes.find((p) => p.connection === connId && p.body.idempotency_key === input.idempotency_key)
           if (known) return json(res, 202, { data: { push_id: known.push_id } })
           const push_id = `66666666-6666-4666-8666-${String(pushes.length + 1).padStart(12, '0')}`

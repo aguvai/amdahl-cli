@@ -127,6 +127,17 @@ describe('amdahl sequencers push', () => {
     expect(server?.pushes).toHaveLength(2)
   })
 
+  it('says what an earlier call added when a later call is refused', async () => {
+    server = await startMockServer({ sequencers: [INSTANTLY], pushesBeforeLive: 1 })
+    const io = fakeIo({ AMDAHL_API_URL: server.url, AMDAHL_KEY: API_KEY })
+    const r = await cli(io, 'sequencers', 'push', leadFile(io, 150), '--campaign', 'camp-draft', '--yes', '--json')
+    expect(r.code).toBe(1)
+    expect(r.json.error.code).toBe('campaign_active')
+    expect(r.json.error.message).toContain('Calls 1 to 1 of 2 already added 100')
+    expect(r.json.counts).toEqual({ added: 100, skipped: 0, failed: 0 })
+    expect(server.pushes).toHaveLength(1)
+  })
+
   it('reads a finished batch with the list it was written from', async () => {
     const io = await withKey()
     const list = join(io.cwd, 'drafts.csv')

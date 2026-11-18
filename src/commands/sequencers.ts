@@ -314,19 +314,36 @@ export async function sequencersPush(ctx: Ctx, args: string[]): Promise<number> 
   }
 
   const pushes: PushResult[] = []
+  const sum = () => pushes.reduce((t, p) => ({ added: t.added + p.counts.added, skipped: t.skipped + p.counts.skipped, failed: t.failed + p.counts.failed }), { added: 0, skipped: 0, failed: 0 })
   for (let part = 0; part < calls; part++) {
     const leads = read.leads.slice(part * LEADS_PER_CALL, (part + 1) * LEADS_PER_CALL)
-    const started = await call(() =>
-      client.request<Record<string, unknown>>(`${PLATFORM}/connections/${encodeURIComponent(connection.id)}/campaigns/${encodeURIComponent(campaign.id)}/leads`, {
-        method: 'POST',
-        body: { leads, idempotency_key: pushKey(connection.id, campaign.id, read.leads, part) },
-      })
-    )
-    const pushId = field(started.push_id)
-    if (calls > 1 && !ctx.out.json) ctx.out.info(`Call ${part + 1} of ${calls} sent.`)
-    pushes.push(await waitForPush(ctx, client, connection, pushId))
+    try {
+      const started = await call(() =>
+        client.request<Record<string, unknown>>(`${PLATFORM}/connections/${encodeURIComponent(connection.id)}/campaigns/${encodeURIComponent(campaign.id)}/leads`, {
+          method: 'POST',
+          body: { leads, idempotency_key: pushKey(connection.id, campaign.id, read.leads, part) },
+        })
+      )
+      const pushId = field(started.push_id)
+      if (calls > 1 && !ctx.out.json) ctx.out.info(`Call ${part + 1} of ${calls} sent.`)
+      pushes.push(await waitForPush(ctx, client, connection, pushId))
+    } catch (err) {
+      // An earlier call already added leads: say so, so nobody reads the error as "nothing was added".
+      if (part > 0 && err instanceof CliError) {
+        const done = sum()
+        throw new CliError(
+          err.code,
+          `${err.message} Calls 1 to ${part} of ${calls} already added ${done.added} to "${clip(campaign.name, 60)}" (${done.skipped} skipped, ${done.failed} failed); the leads after lead ${part * LEADS_PER_CALL} were not sent.`,
+          err.exit,
+          err.hint,
+          err.detail,
+          { ...err.data, counts: done, pushes }
+        )
+      }
+      throw err
+    }
   }
-  const total = pushes.reduce((t, p) => ({ added: t.added + p.counts.added, skipped: t.skipped + p.counts.skipped, failed: t.failed + p.counts.failed }), { added: 0, skipped: 0, failed: 0 })
+  const total = sum()
   const ok = pushes.every((p) => p.status === 'done')
   const human = [
     `Added ${total.added} to "${clip(campaign.name, 60)}" in ${connection.name}. ${total.skipped} skipped (already in the campaign), ${total.failed} failed.`,
