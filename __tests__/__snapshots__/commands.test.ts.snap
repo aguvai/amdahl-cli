@@ -29,6 +29,11 @@ What you can do:
   amdahl runs                    Your latest runs (amdahl run <id> opens one)
   amdahl connect hubspot         Add a CRM or call recorder in the console
                                  (amdahl connections lists what is connected)
+  amdahl sequencers push drafts-other.csv --campaign <id>
+                                 Add the leads and Amdahl's messages to a
+                                 paused or draft campaign in your connected
+                                 sequencer (amdahl sequencers campaigns lists
+                                 them); it asks first
   amdahl status                  Check that this workspace can optimize
   amdahl open                    Open this workspace in the console
   amdahl keys create --name ci   Make an API key for a server or CI
@@ -96,6 +101,14 @@ Commands:
   connections [--all]                        Connected sources and health
   connect [<connector>] [--no-browser]       Open the console's add page
   open    [--no-browser]                     This workspace in the console
+  sequencers campaigns [<connection>]        A connected sequencer's campaigns
+  sequencers push <file|batch-id> --campaign <id> [--connection <id|type>]
+           [--list <file>] [--channel email|linkedin] [--yes]
+           Add leads, with the messages Amdahl wrote, to a paused or draft
+           campaign. It shows the campaign and the lead count and asks first;
+           --yes skips the question. A file needs an amdahl_message column
+           (optimize --list <list> --for other writes one); a batch id needs
+           --list, the list it was written from. Up to 100 leads a call.
   feedback <run-id> --evidence did_it_myself|reported_to_me|inferred
            [--outcome used|used_with_edits|not_used|unsure]
            [--sent-text <file> | -] [--comment <text>]

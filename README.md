@@ -387,6 +387,9 @@ amdahl search --research-id <id>
 amdahl connections [--all]
 amdahl connect [<connector>] [--no-browser]
 amdahl open [--no-browser]
+amdahl sequencers campaigns [<connection>]
+amdahl sequencers push <file|batch-id> --campaign <id> [--connection <id|type>] [--list <file>]
+                [--channel email|linkedin] [--yes]
 amdahl feedback <run-id> --evidence did_it_myself|reported_to_me|inferred
                 [--outcome used|used_with_edits|not_used|unsure] [--sent-text <file>|-] [--comment <text>]
 amdahl sent <run-id> --provider <provider> --channel <channel> --sent-as returned|edited
@@ -803,6 +806,46 @@ Import file for lemlist: drafts-lemlist.csv
   ready), `ready`, `left_out` (`failed`, `not_written`, `needs_input`,
   `no_contact`) and `over_limit`. With no lead ready, no file is written and
   the exit is 1.
+
+### Add the leads to your connected sequencer
+
+When the workspace has connected Instantly, Smartlead, lemlist, HeyReach or
+Amplemarket in the console, the CLI can add the leads, with Amdahl's messages,
+straight into one of its campaigns instead of writing a file to import.
+
+```sh
+amdahl sequencers campaigns
+amdahl optimize --list drafts.csv --for other --channel email
+amdahl sequencers push drafts-other.csv --campaign camp_123
+```
+
+```
+Add 38 leads to the paused Instantly campaign "Q4 founders" (camp_123).
+First lead: dana@northwind.com, subject "Provisioning at Northwind".
+Amdahl adds the leads only. It does not start the campaign or send an email.
+Add them? [y/N] y
+Added 38 to "Q4 founders" in Instantly. 0 skipped (already in the campaign), 0 failed.
+```
+
+- **Campaigns:** `sequencers campaigns [<connection>]` reads them live: id,
+  name and status. Leads go only into a **paused** or **draft** campaign; a
+  live one, or one whose status Amdahl cannot read, is refused before anything
+  is sent. Amdahl never starts the campaign, sends an email, or edits or
+  removes a lead.
+- **Leads:** a CSV or JSONL file with an `amdahl_message` column and an email
+  or a `linkedin_url` per lead (the `--for other` file has both), or a finished
+  batch with the list it was written from: `amdahl sequencers push <batch-id>
+  --list drafts.csv --channel email --campaign camp_123`.
+- **It asks first.** It shows the campaign's name and status, how many leads it
+  adds and the first one, then asks. `--yes` adds without asking, for a
+  script. With no terminal and no `--yes`, nothing is added (exit 2).
+- **Size:** up to 100 leads go in one call, and up to 1,000 in one command.
+  Running the same command again adds nothing twice.
+- **Permission:** it needs `sequencers:push`. A sign-in made with this version
+  has it (run `amdahl login` again if yours is older). An API key has it only
+  when it was created with **Add leads to sequencer campaigns**.
+- **Under `--json`:** `{ok, connection, campaign, counts: {added, skipped,
+  failed}, pushes, left_out}`.
 
 ## After you send
 

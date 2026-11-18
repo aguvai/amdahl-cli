@@ -185,6 +185,8 @@ function errorDetails(body: string | undefined): Record<string, unknown> {
 
 /** What each call does, said as a verb, for "This credential cannot <verb>." Longest path first. */
 const CALL_VERBS: [string, string][] = [
+  ['/campaigns', 'add leads to a sequencer campaign'],
+  ['/pushes/', 'add leads to a sequencer campaign'],
   ['/messages/optimize/batch', 'optimize a list'],
   ['/messages/optimize_prompt', 'grade or improve a prompt'],
   ['/feedback', 'record feedback'],
@@ -217,6 +219,9 @@ function plainMessage(err: AmdahlApiError): string | null {
   }
   if (err.errorCode === 'missing_scope' || /^Missing required scope/i.test(err.message)) {
     const verb = CALL_VERBS.find(([prefix]) => err.path.includes(prefix))?.[1] ?? 'do this'
+    if (/sequencers:push/.test(err.message)) {
+      return `This credential cannot ${verb}. Run \`${amdahlCommand('login')}\` again, or use a key created with Add leads to sequencer campaigns.`
+    }
     return `This credential cannot ${verb}. Use a Customer agent key, or run \`${amdahlCommand('login')}\` again.`
   }
   return null

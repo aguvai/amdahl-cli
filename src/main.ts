@@ -18,6 +18,7 @@ import { prompt } from './commands/prompt'
 import { recipes } from './commands/recipes'
 import { run, runs } from './commands/runs'
 import { search } from './commands/search'
+import { sequencersCampaigns, sequencersPush } from './commands/sequencers'
 import { noSetupLine, setup, setupMode } from './commands/setup'
 import { skillsAdd } from './commands/skills'
 import { status, workspaceList, workspaceUse } from './commands/workspace-status'
@@ -47,6 +48,8 @@ const COMMANDS: Record<string, Handler> = {
   connections: (ctx) => connections(ctx),
   connect,
   open: (ctx) => open(ctx),
+  'sequencers campaigns': sequencersCampaigns,
+  'sequencers push': sequencersPush,
   feedback,
   sent,
   'keys create': (ctx) => keysCreate(ctx),
