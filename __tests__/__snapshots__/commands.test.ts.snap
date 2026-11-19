@@ -20,6 +20,9 @@ What you can do:
                                  Also write drafts-lemlist.csv, a file your
                                  sequencer imports, and say how (Instantly,
                                  Smartlead, lemlist, HeyReach, Apollo and more)
+  amdahl sequence emails.md      Improve a 2 to 10 email sequence, in order
+  amdahl sequence --write "<goal>"
+                                 Write a new one, 2 to 6 emails
   amdahl grade draft.md          Grade a message: score and the lines behind
   amdahl prompt prompt.md        Grade or improve a reusable prompt by the
                                  emails it writes
@@ -67,6 +70,13 @@ Commands:
                        hubspot, lgm, woodpecker, other (any tool that imports
                        a CSV). lemlist, reply_io and other take both channels,
                        so add --channel email|linkedin.
+  sequence [<file>|-] [--evidence off|workspace] [--on-unsupported flag|remove]
+           [--context <file.json>] [--csv [<file.csv>]] [--force]
+  sequence --write "<goal>" [--emails <2-6>] [--plan <file>] [the flags above]
+           Improve 2 to 10 emails in order (a text, markdown or CSV file, or -
+           for stdin), or write 2 to 6 new ones. Each email is written as a
+           follow-up to the improved ones before it. --json prints {ok, mode,
+           emails, fields}: each email has .subject, .message and .run_id.
   grade <file|-> [--channel email|linkedin] [--evidence off|workspace]
            [--context <file.json>]
            Grade a draft and write nothing. The score always comes with its

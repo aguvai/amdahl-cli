@@ -95,6 +95,8 @@ export interface MockOptions {
   decision?: 'approved' | 'denied' | 'expired'
   /** The optimize result body (inside `data`). */
   optimizeResult?: Record<string, unknown>
+  /** The optimize result body for each request, from the request's own body and its place (from 0): a message made from what was sent. Wins over `optimizeResult`. */
+  optimizeAnswer?: (body: Record<string, unknown>, index: number) => Record<string, unknown>
   /** Access token lifetime in seconds. */
   expiresIn?: number
   /** Answer every /oauth/revoke with a 503. */
@@ -178,6 +180,7 @@ const b64url = (buf: Buffer) => buf.toString('base64url')
 
 export async function startMockServer(options: MockOptions = {}): Promise<MockServer> {
   const log: LoggedRequest[] = []
+  let optimizeCalls = 0
   const issued = { access: [] as string[], refresh: [] as string[] }
   const revoked: string[] = []
   const keyRequests = new Map<string, Record<string, unknown>>()
@@ -585,6 +588,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
 
       if (path === '/api/platform/v1/messages/optimize' && req.method === 'POST') {
         const input = JSON.parse(body) as { message?: string; mode?: string; evidence?: string; context?: unknown }
+        const answered = optimizeCalls++
         const problems = optimizeProblems(input)
         if (problems.length) return json(res, 400, { error: { code: 'invalid_input', message: `Input failed schema validation: ${problems[0]}`, details: { errors: problems } } })
         if (input.mode === 'grade') {
@@ -594,7 +598,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
           return json(res, 200, { data: options.gradeResult ?? gradeBody(input.evidence === 'workspace') })
         }
         return json(res, 200, {
-          data: options.optimizeResult ?? { ok: true, message: `better: ${input.message}`, summary: 'Tighter opener.', unchanged: false, run_id: 'r1', ...(options.whatChanged ? WHAT_CHANGED : {}) },
+          data: options.optimizeAnswer?.(input as Record<string, unknown>, answered) ?? options.optimizeResult ?? { ok: true, message: `better: ${input.message}`, summary: 'Tighter opener.', unchanged: false, run_id: 'r1', ...(options.whatChanged ? WHAT_CHANGED : {}) },
         })
       }
 

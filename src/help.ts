@@ -121,6 +121,75 @@ array of those. A list prints the batch, and each item's result, with --json.
 Exit 1 when a message could not be rewritten.
 ${GLOBAL}`,
 
+  sequence: `Usage: amdahl sequence <file> | -  [--evidence off|workspace]
+                       [--on-unsupported flag|remove] [--context <file.json>]
+                       [--csv [<file.csv>]] [--force]
+       amdahl sequence --write "<goal>" [--emails <2-6>] [--plan <file>]
+                       [--context <file.json>] [--csv [<file.csv>]] [--force]
+       amdahl sequence
+
+Improve a sequence of 2 to 10 emails, or write a new one of 2 to 6. The emails
+run in order, and each is written as a follow-up to the improved emails before
+it. Each email is one request, so a sequence of 4 is 4 runs.
+
+The file is text or markdown, or "-" for standard input. A line of --- or a
+short heading such as "Email 2" or "Follow-up" starts the next email. An email
+may start with a Subject: line. Email 1 keeps its subject. A later email with a
+Subject: line starts a new thread and keeps it. A later email with none is a
+reply in the same thread and goes with no subject:
+
+  Subject: Ramping SDRs at {{company}}
+
+  Hi {{first_name}}, most teams take 4 months to ramp a new rep.
+  ---
+  Hi {{first_name}}, bumping this up. Worth a quick call?
+  ---
+  Subject: Close the loop?
+
+  Hi {{first_name}}, should I stop reaching out?
+
+A CSV file has one column for each email, step_1_body, step_2_body and so on,
+and may have step_1_subject and so on. The first row with text is the sequence.
+
+Fill-in fields such as {{first_name}} are sent as they are. After the last
+email it says whether each field is still there, and names the emails that lost
+one.
+
+  --evidence off|workspace     "workspace" also checks each claim against your
+                               customers' own conversations. Slower.
+  --on-unsupported flag|remove What to do with a claim nothing backs.
+  --context <file.json>        Your rules, voice_examples and facts, as JSON,
+                               for every email. Not prior_touches: Amdahl
+                               sends the emails before each one itself.
+  --channel                    Not taken: a sequence is email only.
+  --write "<goal>"             Write a new sequence for this goal, up to 300
+                               characters. The plan comes first, then each
+                               email is written after the ones before it.
+  --emails <2-6>               With --write: how many emails. Default 3.
+  --plan <file>                With --write: your own plan, one email on each
+                               line, "Name: job" or "Name" alone, 2 to 6 lines.
+  --csv [<file.csv>]           Also save the emails as a CSV with the columns
+                               Email, Subject and Message. With no name, it is
+                               next to the file (emails.md gives
+                               emails-amdahl.csv), or sequence-amdahl.csv here.
+                               Put it after the file. A name ends in .csv.
+  --force                      With --csv: replace a file that already exists.
+
+At a terminal, --write shows the plan and asks "Write these N emails?". An
+agent, CI, a pipe or --json is not asked. With no file and no --write, at a
+terminal, it asks what to do: improve emails you paste, or write a new sequence.
+
+In the CSV, a cell that starts with =, +, - or @ gets a ' in front, so a
+spreadsheet does not run it as a formula.
+
+Output: each email goes to stdout under "Email 1 of 3". What Amdahl changed goes
+to stderr. A failed email stops the run: the ones before it are printed, the
+rest are not sent, and it exits 1. With --json it prints {"ok", "mode",
+"emails", "fields"}: each email has .subject, .message, .run_id and .result;
+.fields has .kept and .lost; on a failure .failed has .index, .reason and
+.detail; with --csv, .file.
+${GLOBAL}`,
+
   search: `Usage: amdahl search "<question>" [--research] [--limit <n>]
        amdahl search --recipe <id> [--<fill-in> <value>]
        amdahl search --research-id <id>
