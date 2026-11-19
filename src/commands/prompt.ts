@@ -21,6 +21,7 @@
 // stdout. `--json` prints {ok, file, started, result}.
 
 import { amdahlCommand } from '../command-name'
+import { promptChangeLines } from '../changes'
 import { apiClient, call, resolveCredential, str, type Credential, type Ctx } from '../context'
 import { CliError, EXIT, usageError } from '../errors'
 import { readTextFile } from '../files'
@@ -177,6 +178,9 @@ export function promptRunLines(run: Record<string, unknown>): string[] {
   // What the sidecar says about this run, as it says it (why a better revision was not kept, for one).
   const says = records(run.notes).map((n) => field(n.says)).filter(Boolean)
   for (const note of says) lines.push(...wrap(note))
+
+  const changes = outcome === 'improved' ? promptChangeLines(run) : []
+  if (changes.length > 0) lines.push('', ...changes)
 
   const rates = lineRates(original)
   if (rates.length > 0) {

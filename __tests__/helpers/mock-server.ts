@@ -35,6 +35,29 @@ export const KNOWN_RUN_BODY = {
   created_at: '2026-11-12T08:00:00Z',
   omitted: [{ what: 'a second proof point', why: 'The context held one.' }],
 }
+/** The `changes` and `added_claims` a server that computes them answers with (MockOptions.whatChanged). */
+export const WHAT_CHANGED = {
+  changes: [
+    { before: 'We are the leading onboarding platform.', after: null, why: 'Nothing backs it.', why_cut: 'nothing in your calls backs it' },
+    { before: null, after: 'Helix cut provisioning tickets by 70% in one quarter.', why: 'Proof.', why_added: 'it gives proof from a team like theirs' },
+    { before: 'Quick note about pricing.', after: 'Quick note on pricing for Helix.', why: 'Names the company.' },
+    { before: 'Can we talk?', after: 'Worth 15 minutes?', why: 'Asks for a time.', why_cut: 'it did not say how long', why_added: 'it asks for 15 minutes' },
+  ],
+  added_claims: [
+    {
+      sentence: 'Helix cut provisioning tickets by 70% in one quarter.',
+      sources: [
+        { id: 's1', tag: 'call', text: 'We cut provisioning tickets by 70% after we moved onto the new platform and trained every support lead on it in the first quarter' },
+        { id: 's2', tag: null, text: 'Second source.' },
+      ],
+    },
+  ],
+}
+/** The `changes` of an improved prompt run (MockOptions.whatChanged). */
+export const PROMPT_CHANGES = [
+  { before: 'Write an email.', after: 'Write a first-touch email to a Head of Platform.', why_cut: 'it named no reader', why_added: 'it says who reads it' },
+  { before: null, after: 'Then ask for 15 minutes.', why_added: 'it ends on one ask' },
+]
 /** The run id of item `index` of any batch the mock ran. */
 export const batchRun = (index: number) => `99999999-9999-4999-8999-${String(index).padStart(12, '0')}`
 
@@ -134,6 +157,8 @@ export interface MockOptions {
   batchMessage?: string
   /** The one-line summary every batch item comes back with (default: `Tighter opener.`). */
   batchSummary?: string
+  /** The server computes `changes` and `added_claims`: optimize, batch items, the known run and an improved prompt run answer with {@link WHAT_CHANGED} and {@link PROMPT_CHANGES}. Unset: they are absent, as on an older server. */
+  whatChanged?: boolean
   /** A whole item's status and result by its index, when the default message does not do. */
   batchResults?: (item: Record<string, unknown>, index: number) => { status: string; result: Record<string, unknown> | null } | undefined
 }
@@ -483,7 +508,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
                   ? options.batchResults(item, index)?.result
                   : options.batchFailures?.includes(index)
                   ? { ok: false, reason: 'optimizer_error', detail: 'It failed.' }
-                  : { ok: true, message: options.batchMessage ?? `better: ${String(item.message)}`, summary: options.batchSummary ?? 'Tighter opener.', what_changed: 'Wrote this message from the context you sent.', run_id: batchRun(index), unchanged: false },
+                  : { ok: true, message: options.batchMessage ?? `better: ${String(item.message)}`, summary: options.batchSummary ?? 'Tighter opener.', what_changed: 'Wrote this message from the context you sent.', run_id: batchRun(index), unchanged: false, ...(options.whatChanged ? WHAT_CHANGED : {}) },
             })),
             next_cursor: last && last.index < entry.items.length - 1 ? String(last.index) : null,
           },
@@ -569,7 +594,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
           return json(res, 200, { data: options.gradeResult ?? gradeBody(input.evidence === 'workspace') })
         }
         return json(res, 200, {
-          data: options.optimizeResult ?? { ok: true, message: `better: ${input.message}`, summary: 'Tighter opener.', unchanged: false, run_id: 'r1' },
+          data: options.optimizeResult ?? { ok: true, message: `better: ${input.message}`, summary: 'Tighter opener.', unchanged: false, run_id: 'r1', ...(options.whatChanged ? WHAT_CHANGED : {}) },
         })
       }
 
@@ -593,7 +618,8 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
         if (!entry) return err(res, 404, 'not_found', 'No prompt run with this id from you in this workspace.')
         entry.polls++
         if (entry.polls <= (options.promptPolls ?? 1)) return json(res, 200, { data: { run_id: promptRead[1], status: 'running', phase: entry.polls === 1 ? 'writing_emails' : 'grading' } })
-        return json(res, 200, { data: { run_id: promptRead[1], status: 'complete', ...(options.promptResult ? options.promptResult(entry.mode) : promptBody(entry.mode)) } })
+        const body = options.promptResult ? options.promptResult(entry.mode) : promptBody(entry.mode)
+        return json(res, 200, { data: { run_id: promptRead[1], status: 'complete', ...body, ...(options.whatChanged && body.outcome === 'improved' ? { changes: PROMPT_CHANGES } : {}) } })
       }
 
       // messages.get_run: one past run, read by its id by the person who made it.

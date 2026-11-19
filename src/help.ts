@@ -72,7 +72,10 @@ With --json it prints the server's setup status as one object.
        amdahl optimize --batch <id> [--list <file>] [--force]
 
 Rewrite an outbound email or LinkedIn message. Each file is one message; "-"
-reads standard input. With no file, at a terminal, paste the message.
+reads standard input. With no file, at a terminal, paste the message. It shows
+what Amdahl changed and why, sentence by sentence. The reasons are documented
+in the cookbook, https://github.com/amdahlco/amdahl-cookbook, in
+prompts/agent-platform/optimize-reasons.md.
 
   --channel email|linkedin     What the message is. Left out, it is inferred.
   --evidence off|workspace     "workspace" also evaluates each claim against
