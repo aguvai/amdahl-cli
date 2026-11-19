@@ -251,7 +251,10 @@ describe('prompt', () => {
     expect(tooFew.stderr).toContain('Improving a prompt needs at least 2 recipients')
     expect((await cli(io, 'prompt', write(io, 'p3.md', PROMPT), '--recipients', one, '--mode', 'grade')).code).toBe(0)
     const seven = write(io, 'seven.json', JSON.stringify(Array.from({ length: 7 }, () => ({ recipient: { company: 'X' } }))))
+    // A script is refused; a person at a terminal uses the first 6 (main-qa.test.ts).
+    io.env.AMDAHL_NO_PROMPT = '1'
     expect((await cli(io, 'prompt', write(io, 'p4.md', PROMPT), '--recipients', seven)).stderr).toContain('needs 1 to 6 recipients, not 7')
+    delete io.env.AMDAHL_NO_PROMPT
     expect((await cli(io, 'prompt', write(io, 'p5.md', PROMPT), '--recipients', write(io, 'bad.json', '{}'))).code).toBe(2)
     expect((await cli(io, 'prompt', write(io, 'p6.md', PROMPT), '--recipients', write(io, 'bad2.json', '[{"label":"x"},{"label":"y"}]'))).stderr).toContain('item 1 needs a "recipient" object')
     expect((await cli(io, 'prompt', write(io, 'big.md', 'x'.repeat(20_001)))).stderr).toContain('at most 20000 characters')

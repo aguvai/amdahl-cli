@@ -189,10 +189,13 @@ export async function recipes(ctx: Ctx): Promise<number> {
   try {
     library = await loadLibrary(ctx)
     // The server is still working out "For you": at a terminal, read again a few times, 2 s apart, then show what came back.
-    for (let i = 0; i < PENDING_READS && library.pending && atTerminal(ctx) && !out.json; i++) {
+    const waiting = () => library.pending && atTerminal(ctx) && !out.json
+    if (waiting()) out.info('Working out For you...')
+    for (let i = 0; i < PENDING_READS && waiting(); i++) {
       await ctx.io.sleep(PENDING_WAIT_MS)
       library = await loadLibrary(ctx)
     }
+    if (waiting()) out.info('For you is not ready yet.')
   } catch (err) {
     // Listing the recipes needs no sign-in: say the sign-in is gone (reading it cleared it), and list the bundled ones.
     if (!(err instanceof CliError)) throw err

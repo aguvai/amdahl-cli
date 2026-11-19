@@ -136,8 +136,9 @@ describe('--for writes the console file', () => {
         '  2. Map email to Email. Keep amdahl_subject and amdahl_message as lead fields',
         '     with these names.',
         '  3. Paste into your step: Subject {{amdahl_subject}}, Body {{amdahl_message}}',
-        "Amplemarket's help pages do not show how a CSV column becomes a lead field, so",
-        'check one lead before you start the sequence. Each field holds at most 1,024',
+        "Amplemarket's public docs do not say how a CSV column becomes a lead field. This",
+        'file names the columns amdahl_subject and amdahl_message, so check that one lead',
+        'shows them before you start the sequence. Each field holds at most 1,024',
         'characters.',
       ].join('\n')
     )

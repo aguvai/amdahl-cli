@@ -44,7 +44,7 @@ describe('bare amdahl prompt at a terminal', () => {
     expect(r.code).toBe(0)
     expect(io.prompts).toEqual([
       'Where does the prompt come from? [Paste my prompt | New signup: Book a call after signup | Pricing page visit: Catch them comparing | Funding or hiring: Open with the news | Champion moved: Reach them at the new job]',
-      'Paste the prompt, then press Enter on an empty line:',
+      'Paste the prompt, then press Enter on an empty line (Ctrl+C to stop):',
       'Which companies should the emails be written for? [Let Amdahl pick up to 6 accounts from your workspace | Type the companies]',
       'Type up to 6 companies, one per line:\n  Company\n  Company | Name\n  Company | Name | what you know about them\nThen press Enter on an empty line:',
       'What should Amdahl do? [Improve it | Grade it]',
@@ -99,13 +99,13 @@ describe('bare amdahl prompt at a terminal', () => {
     expect(bodies()).toEqual([{ prompt: PROMPT, mode: 'grade', recipients: [{ recipient: { company: 'Helix' }, label: 'Helix' }] }])
   })
 
-  it('stopping at that offer sends nothing', async () => {
+  it('stopping at that offer keeps the company; adding none asks what now again', async () => {
     const io = await signedIn()
-    io.answers.push('1', PROMPT, '2', 'Helix', '1', '2')
-    const r = await cli(io, 'prompt')
+    io.answers.push('1', PROMPT, '2', 'Helix', '1', '2', '', '1')
+    const r = await cli(io, 'prompt', '--no-wait')
     expect(r.code).toBe(0)
-    expect(r.stderr).toContain('Nothing was sent.')
-    expect(bodies()).toEqual([])
+    expect(io.prompts.filter((p) => p.startsWith('What now?'))).toHaveLength(2)
+    expect(bodies()).toMatchObject([{ mode: 'grade', recipients: [{ recipient: { company: 'Helix' } }] }])
   })
 
   it('a company with a comma stays whole, a bar or a tab splits, and a long label is cut to the server cap', async () => {
@@ -177,8 +177,9 @@ describe('--recipients with a CSV', () => {
     expect(bodies()).toEqual([])
   })
 
-  it('keeps the JSON limits: 7 rows are refused, and Improve needs 2', async () => {
+  it('keeps the JSON limits: 7 rows are refused off a terminal, and Improve needs 2', async () => {
     const io = await signedIn()
+    io.env.AMDAHL_NO_PROMPT = '1'
     const seven = write(io, 'seven.csv', `company\n${'a,b,c,d,e,f,g'.split(',').join('\n')}\n`)
     const big = await cli(io, 'prompt', write(io, 'p.md', PROMPT), '--recipients', seven)
     expect(big.code).toBe(2)

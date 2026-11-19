@@ -70,12 +70,16 @@ export interface GuidedAnswers {
  */
 export async function askGuided(ctx: Ctx, skip: Skip): Promise<GuidedAnswers | null> {
   const { io, out } = ctx
+  // Only the steps a flag has not answered are shown, and they are numbered as shown.
+  const total = 1 + (skip.recipients ? 0 : 1) + (skip.mode ? 0 : 1)
+  let shown = 0
+  const step = (title: string) => out.info(total === 1 ? `${title[0]?.toUpperCase()}${title.slice(1)}` : `Step ${++shown} of ${total}: ${title}`)
 
-  out.info('Step 1 of 3: your prompt')
+  step('your prompt')
   const source = await io.select('Where does the prompt come from?', [PASTE, ...PROMPT_STARTERS.map((s) => `${s.title}: ${s.line}`)], { initial: 0 })
   let prompt: string
   if (source === 0) {
-    prompt = await io.readPaste('Paste the prompt, then press Enter on an empty line:')
+    prompt = await io.readPaste('Paste the prompt, then press Enter on an empty line (Ctrl+C to stop):')
     if (!prompt.trim()) {
       out.info('Nothing pasted, so nothing was sent.')
       return null
@@ -87,7 +91,7 @@ export async function askGuided(ctx: Ctx, skip: Skip): Promise<GuidedAnswers | n
 
   let recipients: Record<string, unknown>[] | undefined
   if (!skip.recipients) {
-    out.info('Step 2 of 3: who to test it on')
+    step('who to test it on')
     const pick = await io.select('Which companies should the emails be written for?', ['Let Amdahl pick up to 6 accounts from your workspace', 'Type the companies'], { initial: 0 })
     if (pick === 1) recipients = await askCompanies(ctx)
   }
@@ -95,34 +99,38 @@ export async function askGuided(ctx: Ctx, skip: Skip): Promise<GuidedAnswers | n
   let mode: 'improve' | 'grade' | undefined
   if (skip.mode !== 'grade') {
     if (!skip.mode) {
-      out.info('Step 3 of 3: what to do with it')
+      step('what to do with it')
       const choice = await io.select('What should Amdahl do?', ['Improve it', 'Grade it'], { initial: 0 })
       mode = choice === 1 ? 'grade' : 'improve'
     } else mode = 'improve'
-    if (mode === 'improve' && recipients && recipients.length === 1) {
+    while (mode === 'improve' && recipients && recipients.length === 1) {
       out.info('Improving needs 2 companies or more: Amdahl checks the revised prompt on a company it did not revise on.')
       const next = await io.select('What now?', ['Grade it instead', 'Stop, I will add another company'], { initial: 0 })
-      if (next === 1) {
-        out.info('Nothing was sent.')
-        return null
-      }
-      mode = 'grade'
+      if (next === 0) mode = 'grade'
+      // The company already typed stays; the next lines are added to it.
+      else recipients = await askCompanies(ctx, recipients)
     }
   }
   return { prompt, ...(recipients ? { recipients } : {}), ...(mode ? { mode } : {}) }
 }
 
-/** Read typed companies until there are 1 to 6 good lines, or the person types none (Amdahl picks). */
-async function askCompanies(ctx: Ctx): Promise<Record<string, unknown>[] | undefined> {
+/**
+ * Read typed companies until there are 1 to 6 good lines, or the person types none (Amdahl picks).
+ * With `kept` (companies already typed), the lines are added to them, and none typed keeps them as they are.
+ */
+async function askCompanies(ctx: Ctx, kept: Record<string, unknown>[] = []): Promise<Record<string, unknown>[] | undefined> {
   const { io, out } = ctx
+  const room = MAX_TYPED - kept.length
   for (;;) {
-    const typed = (await io.readPaste(TYPED_QUESTION, { emptyEnds: true })).split('\n').map((l) => l.trim()).filter(Boolean)
+    const question = kept.length > 0 ? `Kept ${kept.length === 1 ? '1 company' : `${kept.length} companies`}. Type up to ${room} more, one per line, then press Enter on an empty line:` : TYPED_QUESTION
+    const typed = (await io.readPaste(question, { emptyEnds: true })).split('\n').map((l) => l.trim()).filter(Boolean)
+    if (typed.length === 0 && kept.length > 0) return kept
     if (typed.length === 0) {
       out.info('No companies typed, so Amdahl will pick them from your workspace.')
       return undefined
     }
-    if (typed.length > MAX_TYPED) {
-      out.info(`That is ${typed.length} companies. A run takes at most ${MAX_TYPED}.`)
+    if (typed.length > room) {
+      out.info(kept.length > 0 ? `That is ${typed.length} more, and ${kept.length} kept. A run takes at most ${MAX_TYPED}.` : `That is ${typed.length} companies. A run takes at most ${MAX_TYPED}.`)
       continue
     }
     const items = typed.map(recipientFromLine)
@@ -131,7 +139,7 @@ async function askCompanies(ctx: Ctx): Promise<Record<string, unknown>[] | undef
       out.info(`Line ${bad + 1} has no company.`)
       continue
     }
-    return items as Record<string, unknown>[]
+    return [...kept, ...(items as Record<string, unknown>[])]
   }
 }
 

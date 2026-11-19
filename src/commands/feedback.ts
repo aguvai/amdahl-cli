@@ -28,6 +28,7 @@ import { readTextFile } from '../files'
 import { findRun } from '../history'
 import { postRating, RATING_SURFACES, RATINGS, type Rating, type RatingSurface } from '../rating'
 import { SEND_TO_PRESETS } from '../send-to'
+import { nearest } from '../suggest'
 import { atTerminal, canAsk } from '../terminal'
 import { clip, field, records } from '../text'
 
@@ -253,7 +254,8 @@ async function buildItem(ctx: Ctx, args: string[], pasted?: string): Promise<Rec
   const id = runId(rawId, usage)
   const rawProvider = str(flags.provider)
   if (rawProvider !== undefined && !SEND_PROVIDERS.includes(rawProvider)) {
-    throw usageError(`--provider must be one of: ${SEND_PROVIDERS.join(', ')}.`, `"${clip(rawProvider, 40)}" is not on the list. For a sender that is not, use --provider other.`)
+    const near = nearest(rawProvider, SEND_PROVIDERS)
+    throw usageError(`--provider must be one of: ${SEND_PROVIDERS.join(', ')}.`, `${near ? `Did you mean ${near}? ` : ''}"${clip(rawProvider, 40)}" is not on the list. For a sender that is not, use --provider other.`)
   }
   const provider = rawProvider
   const rawChannel = str(flags.channel)
@@ -418,7 +420,10 @@ function inferChannel(ctx: Ctx, runIdValue: string, flags: Ctx['flags']): string
  * (--provider-send-id <id> | --recipient <email|url> | --recipient-key-hash <sha256>)
  * [--sent-at <time>] ...`. At a terminal, what is missing is asked (see {@link askSent}).
  */
-export async function sent(ctx: Ctx, args: string[]): Promise<number> {
+export async function sent(given: Ctx, args: string[]): Promise<number> {
+  // A tool's id is lower case: `--provider Instantly` is the same as `--provider instantly`.
+  const provider = str(given.flags.provider)
+  const ctx = provider === undefined ? given : { ...given, flags: { ...given.flags, provider: provider.trim().toLowerCase() } }
   const asked = askingAllowed(ctx) ? await askSent(ctx, args) : { flags: ctx.flags, pasted: undefined }
   const send = asked.flags === ctx.flags ? ctx : { ...ctx, flags: asked.flags }
   const item = await buildItem(send, args, asked.pasted)

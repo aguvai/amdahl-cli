@@ -32,10 +32,11 @@ import { askRating } from '../rating'
 import { apiClient, call, resolveCredential, str, type Credential, type Ctx } from '../context'
 import { CliError, EXIT, usageError } from '../errors'
 import { blockLines } from '../blocks'
+import { withElapsed } from '../elapsed'
 import { clip, count, cutAtWord, day, field, paragraphs, plainMarkdown, record, records, wrap } from '../text'
 import { FILL_MAX } from '../recipes-data'
 import { connectLine } from './connections'
-import { offerResearch, routedLine } from './search-offer'
+import { canStartResearch, offerReason, offerResearch, routedLine } from './search-offer'
 import { FILL_FLAGS, loadLibrary, recipeById, recipeQuestion } from './recipes'
 
 const PLATFORM = '/api/platform/v1'
@@ -119,10 +120,11 @@ function rowsOf(result: Record<string, unknown>): Record<string, unknown>[] {
  * `not_enough_data` (the rows do not answer the question) or `failed`. Empty
  * for an answer, and for `skipped` (no rows, which has its own line).
  */
-function noAnswerLines(status: string, rows: number): string[] {
+function noAnswerLines(status: string, rows: number, offered = false): string[] {
   if (rows === 0) return []
   if (status === 'not_enough_data') {
-    return [...wrap(`Amdahl couldn't answer that from these rows. Try rephrasing the question, or run ${amdahlCommand('connections')} to see whether your data is synced.`), '']
+    // The server's research offer is the next step, so the rephrasing advice is not said too.
+    return [...wrap(offered ? "Amdahl couldn't answer that from these rows." : `Amdahl couldn't answer that from these rows. Try rephrasing the question, or run ${amdahlCommand('connections')} to see whether your data is synced.`), '']
   }
   if (status === 'failed') return [...wrap(`Amdahl found rows but couldn't write an answer this time. Here are the rows. Try again, or rephrase the question.`), '']
   return []
@@ -178,8 +180,8 @@ function nextStepLine(): string {
   return wrap('Next: add --research, which can answer a why or compare question (it needs a Customer agent key), or name the company exactly as your CRM spells it.').join('\n')
 }
 
-/** The line for a search cut short, with the one way on: research can run longer. */
-export function outOfTimeLines(rows: number, researchAsked = false, researchId = ''): string[] {
+/** The line for a search cut short, with the one way on: research can run longer. `canResearch`: the credential can start it, so no key is asked for. */
+export function outOfTimeLines(rows: number, researchAsked = false, researchId = '', canResearch = false): string[] {
   // Research was already asked for: it cannot be suggested again. Say it ran out of time even so, and
   // where the job can be read later when it started one.
   if (researchAsked) {
@@ -188,10 +190,12 @@ export function outOfTimeLines(rows: number, researchAsked = false, researchId =
         (researchId ? ` The research job may still finish: read it later with ${amdahlCommand(`search --research-id ${researchId}`)}.` : ' Try again, or narrow the question.')
     )
   }
+  // A credential that can research is not told to get one.
+  const key = canResearch ? '' : ` ${researchKeyLine()}`
   return wrap(
     rows === 0
-      ? `The search ran out of time before it found anything. Run the same command with --research: it can run longer. ${researchKeyLine()}`
-      : `Part of the search ran out of time, so these rows may be incomplete. Run the same command with --research: it can run longer. ${researchKeyLine()}`
+      ? `The search ran out of time before it found anything. Run the same command with --research: it can run longer.${key}`
+      : `Part of the search ran out of time, so these rows may be incomplete. Run the same command with --research: it can run longer.${key}`
   )
 }
 
@@ -207,7 +211,7 @@ export function searchLines(result: Record<string, unknown>, question = '', rese
   const answer = record(result.answer)
   const answered = answer?.status === 'answered' && paragraphs(answer.text)
   if (answered) lines.push(...wrap(plainMarkdown(answered)), '')
-  else lines.push(...noAnswerLines(field(answer?.status), rows.length))
+  else lines.push(...noAnswerLines(field(answer?.status), rows.length, offerReason(result) !== ''))
   const shown = rows.slice(0, answered ? ROWS_UNDER_ANSWER : ROWS_ALONE)
   if (shown.length > 0) {
     if (answered || lines.length > 0) lines.push(answered ? 'From:' : 'Rows it read:')
@@ -255,7 +259,11 @@ export function researchLines(job: Record<string, unknown>): string[] {
  * Wait for a research job to settle: one long-poll read after another, up to
  * {@link RESEARCH_TIMEOUT_MS}. Returns the last read.
  */
-async function waitForResearch(ctx: Ctx, credential: Credential, id: string): Promise<Record<string, unknown>> {
+function waitForResearch(ctx: Ctx, credential: Credential, id: string): Promise<Record<string, unknown>> {
+  return withElapsed(ctx, 'Researching', () => pollResearch(ctx, credential, id))
+}
+
+async function pollResearch(ctx: Ctx, credential: Credential, id: string): Promise<Record<string, unknown>> {
   const client = apiClient(ctx, credential)
   const started = ctx.io.now()
   for (;;) {
@@ -397,10 +405,10 @@ async function showAnswer(ctx: Ctx, credential: Credential, body: Record<string,
   }
   const researchId = field(handoff?.research_id)
   if (cut && rows.length === 0 && !answered) {
-    out.info(outOfTimeLines(0, researchAsked, researchId).join('\n'))
+    out.info(outOfTimeLines(0, researchAsked, researchId, canStartResearch(credential)).join('\n'))
     return EXIT.general
   }
-  if (cut) out.info(outOfTimeLines(rows.length, researchAsked, researchId).join('\n'))
+  if (cut) out.info(outOfTimeLines(rows.length, researchAsked, researchId, canStartResearch(credential)).join('\n'))
   if (setup) {
     // A person who asked for research hears why this is not it, even with nothing connected.
     if (refusedForScope(notes)) out.info(wrap(researchKeyFirst()).join('\n'))

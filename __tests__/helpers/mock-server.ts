@@ -124,6 +124,10 @@ export interface MockOptions {
   searchResult?: Record<string, unknown>
   /** Research reads that answer `running` before the job completes. */
   researchPolls?: number
+  /** Each research read takes this long to answer (a long-poll that holds). */
+  researchDelayMs?: number
+  /** The optimize request is never answered; `onClose` runs when the client drops it. */
+  optimizeHang?: { onClose: () => void }
   /** The research answer's text (default: one sentence). */
   researchText?: string
   /** The research read is refused for want of `conversations:read`, though the key could start the job. */
@@ -487,7 +491,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
         if (options.researchUnknown) return err(res, 404, 'not_found', `research://${research[1]} not found`)
         researchReads++
         const done = researchReads > (options.researchPolls ?? 1)
-        return json(res, 200, {
+        const reply = () => json(res, 200, {
           data: {
             research_id: research[1],
             chat_id: 'chat1',
@@ -499,6 +503,8 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
             error: null,
           },
         })
+        if (options.researchDelayMs) return void setTimeout(reply, options.researchDelayMs)
+        return reply()
       }
 
       if (path === '/api/platform/v1/connections' && req.method === 'GET') {
@@ -679,6 +685,10 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
       if (path === '/api/platform/v1/messages/optimize' && req.method === 'POST') {
         const input = JSON.parse(body) as { message?: string; mode?: string; evidence?: string; context?: unknown }
         const answered = optimizeCalls++
+        if (options.optimizeHang) {
+          res.on('close', options.optimizeHang.onClose)
+          return
+        }
         const refusal = options.optimizeRefusal?.(answered)
         if (refusal) return res.writeHead(refusal.status, { 'Content-Type': 'application/json', ...refusal.headers }).end(JSON.stringify(refusal.body))
         const problems = optimizeProblems(input)

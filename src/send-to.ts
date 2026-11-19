@@ -26,6 +26,7 @@
 
 import { basename } from 'node:path'
 import { usageError } from './errors'
+import { nearest } from './suggest'
 
 export type Channel = 'email' | 'linkedin'
 
@@ -173,7 +174,7 @@ export const SEND_TO_PRESETS: readonly SendToPreset[] = [
     where: 'Upload the CSV to a List, then add the leads in that List to your sequence.',
     match: () => 'Map email to Email. Keep amdahl_subject and amdahl_message as lead fields with these names.',
     insert: PASTE,
-    note: "Amplemarket's help pages do not show how a CSV column becomes a lead field, so check one lead before you start the sequence. Each field holds at most 1,024 characters.",
+    note: "Amplemarket's public docs do not say how a CSV column becomes a lead field. This file names the columns amdahl_subject and amdahl_message, so check that one lead shows them before you start the sequence. Each field holds at most 1,024 characters.",
     maxValue: 1024,
     variable: braces,
   },
@@ -544,7 +545,8 @@ export function toolFor(value: string): SendToPreset {
   if (NO_FILE.includes(lower)) {
     throw usageError(`${lower === 'gmail' ? 'Gmail' : 'Outlook'} sends from a mailbox, so it has no import file.`, 'Use --for other for any tool that imports a CSV.')
   }
-  throw usageError(`--for must be one of: ${SEND_TO_IDS.join(', ')}.`, 'Use other for a tool that is not listed.')
+  const near = nearest(lower, SEND_TO_IDS)
+  throw usageError(`--for must be one of: ${SEND_TO_IDS.join(', ')}.`, `${near ? `Did you mean ${near}? ` : ''}Use other for a tool that is not listed.`)
 }
 
 /**
