@@ -220,7 +220,8 @@ export function searchLines(result: Record<string, unknown>, question = '', rese
     if (said) lines.push(...wrap(said))
     if (freshness) lines.push(...wrap(freshness))
     if (!said && !freshness) lines.push('No matches.')
-    if (!researchAsked && WHY_OR_COMPARE.test(question)) lines.push('', nextStepLine())
+    // When the server offers research itself, its offer is the next step (search-offer.ts), so this one is not said again.
+    if (!researchAsked && WHY_OR_COMPARE.test(question) && !record(result.research_offer)) lines.push('', nextStepLine())
   }
   const gap = field(record(result.statistical_gap)?.message)
   if (gap) lines.push(...wrap(gap))

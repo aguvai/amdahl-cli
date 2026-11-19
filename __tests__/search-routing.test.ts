@@ -167,6 +167,17 @@ describe('the research offer', () => {
     expect(posts()).toHaveLength(1)
   })
 
+  it('with no rows, the offer is the one next step: the old --research hint is not said too', async () => {
+    const empty = { results: [], answer: { status: 'no_answer' }, detail: { message: 'Nothing in the data says why.' } }
+    const io = await withKey({ searchResult: offered(empty) }, false)
+    const r = await cli(io, 'search', 'why do deals die')
+    expect(r.stdout).not.toContain('add --research')
+    expect(r.stderr).toBe(`${CAUSE_OFFER}\nRun it as research: amdahl search 'why do deals die' --research\n`)
+    await server!.close()
+    const old = await withKey({ searchResult: offered({ ...empty, research_offer: undefined }) }, false)
+    expect((await cli(old, 'search', 'why do deals die')).stdout).toContain('add --research')
+  })
+
   it('a server that sends no offer gets today\'s output', async () => {
     const io = await withKey({}, true)
     const r = await cli(io, 'search', 'why do deals die')
