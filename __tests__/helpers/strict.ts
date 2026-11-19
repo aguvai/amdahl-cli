@@ -71,9 +71,38 @@ function priorTouchProblems(at: string, touches: unknown): string[] {
 }
 
 /** The refusals of the `context` of messages.optimize (optimizerContextSchema): the batch's keys, and `prior_touches`, `stage`, `offer`, `thread`, `triggers`. */
-export function optimizeContextProblems(context: unknown): string[] {
-  const errors = contextProblems('$.context', context, ['triggers', 'offer', 'thread', 'stage', 'prior_touches'])
-  if (isObject(context) && context.prior_touches !== undefined) errors.push(...priorTouchProblems('$.context.prior_touches', context.prior_touches))
+export function optimizeContextProblems(context: unknown, at = '$.context'): string[] {
+  const errors = contextProblems(at, context, ['triggers', 'offer', 'thread', 'stage', 'prior_touches'])
+  if (isObject(context) && context.prior_touches !== undefined) errors.push(...priorTouchProblems(`${at}.prior_touches`, context.prior_touches))
+  return errors
+}
+
+// messageOptimizer/recipient.ts: recipientSchema (strict; attributes at most 100 string values of 1000 characters, keys of 100).
+const RECIPIENT_KEYS = ['email', 'name', 'company', 'domain', 'linkedin_url', 'attributes']
+const RECIPIENT_LIMITS: Record<string, number> = { email: 320, name: 200, company: 200, domain: 253, linkedin_url: 300 }
+
+/** The refusals of an item's `recipient`: unknown keys, string lengths and the attributes. */
+function recipientProblems(at: string, recipient: unknown): string[] {
+  if (!isObject(recipient)) return [`${at}: Expected object`]
+  const errors = unknownKeys(at, recipient, RECIPIENT_KEYS)
+  for (const [key, max] of Object.entries(RECIPIENT_LIMITS)) {
+    const value = recipient[key]
+    if (value === undefined) continue
+    if (typeof value !== 'string') errors.push(`${at}.${key}: Expected string`)
+    else if (value.length > max) errors.push(`${at}.${key}: String must contain at most ${max} character(s)`)
+  }
+  const attributes = recipient.attributes
+  if (attributes !== undefined) {
+    if (!isObject(attributes)) errors.push(`${at}.attributes: Expected object`)
+    else {
+      if (Object.keys(attributes).length > 100) errors.push(`${at}.attributes: must have at most 100 entries`)
+      for (const [key, value] of Object.entries(attributes)) {
+        if (key.length > 100) errors.push(`${at}.attributes.${key.slice(0, 20)}: key must be at most 100 characters`)
+        if (typeof value !== 'string') errors.push(`${at}.attributes.${key}: Expected string`)
+        else if (value.length > 1000) errors.push(`${at}.attributes.${key}: String must contain at most 1000 character(s)`)
+      }
+    }
+  }
   return errors
 }
 
@@ -99,7 +128,10 @@ export function batchProblems(input: unknown): string[] {
     const at = `$.items[${i}]`
     if (!isObject(item)) return void errors.push(`${at}: Expected object`)
     errors.push(...unknownKeys(at, item, BATCH_ITEM_KEYS))
-    if (typeof item.message !== 'string') errors.push(`${at}.message: Required`)
+    // An item needs a draft, or something to write from (messageOptimizer/contextFirst.missingInput; _batchInput.refuseMissingInput): facts, rules, voice examples, earlier touches or a recipient.
+    if (item.message === undefined) {
+      if (!writable(item.context) && !(isObject(item.recipient) && Object.keys(item.recipient).length > 0)) errors.push(`${at}.message: Required`)
+    } else if (typeof item.message !== 'string') errors.push(`${at}.message: Expected string`)
     else if (item.message.length > 10_000) errors.push(`${at}.message: String must contain at most 10000 character(s)`)
     if (item.item_id !== undefined) {
       if (typeof item.item_id !== 'string' || item.item_id.trim().length < 1 || item.item_id.trim().length > 200) errors.push(`${at}.item_id: String must contain 1 to 200 character(s)`)
@@ -111,7 +143,8 @@ export function batchProblems(input: unknown): string[] {
       if (item[key] !== undefined && !allowed.includes(String(item[key]))) errors.push(`${at}.${key}: Invalid enum value. Expected ${allowed.map((a) => `'${a}'`).join(' | ')}, received '${String(item[key])}'`)
     }
     if (item.include_tries !== undefined && typeof item.include_tries !== 'boolean') errors.push(`${at}.include_tries: Expected boolean`)
-    if (item.context !== undefined) errors.push(...contextProblems(`${at}.context`, item.context))
+    if (item.context !== undefined) errors.push(...optimizeContextProblems(item.context, `${at}.context`))
+    if (item.recipient !== undefined) errors.push(...recipientProblems(`${at}.recipient`, item.recipient))
   })
   return errors.slice(0, 20)
 }

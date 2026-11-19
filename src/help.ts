@@ -128,6 +128,11 @@ ${GLOBAL}`,
                        [--csv [<file.csv>]] [--force]
        amdahl sequence --write "<goal>" [--emails <2-6>] [--plan <file>]
                        [--context <file.json>] [--csv [<file.csv>]] [--force]
+       amdahl sequence <file> --leads <list.csv> [--match <field>=<column>]
+                       [--fallback <field>=<text>] [--same <field>=<text>]
+                       [--drop <field>] [--for <tool>] [--force] [--resume]
+       amdahl sequence --write "<goal>" --leads <list.csv> [--emails <2-6>]
+                       [--plan <file>] [--for <tool>] [--force] [--resume]
        amdahl sequence
 
 Improve a sequence of 2 to 10 emails, or write a new one of 2 to 6. The emails
@@ -183,6 +188,61 @@ terminal, it asks what to do: improve emails you paste, or write a new sequence.
 
 In the CSV, a cell that starts with =, +, - or @ gets a ' in front, so a
 spreadsheet does not run it as a formula.
+
+A sequence for each person: add --leads <list.csv> (up to 500 people; it needs
+an email, LinkedIn, or name and company column). Each person's email 2 is
+written as a follow-up to their own email 1, never another person's. Email 1 is
+sent as a batch for everyone (as several, when one request would pass about 900
+KB), then email 2 for everyone whose email 1 came back, and so on. Every batch
+of an email is read before the next email starts. A person whose email fails
+stops there. A written sequence (--write) starts with one sample person at a
+terminal, shows it, and asks "Write 3 emails for each of the other N people: up
+to M runs. Start?". At a terminal it also asks "Start?" once for an improved
+sequence. An agent, CI, a pipe or --json is never asked.
+
+The results file is written before the first batch and after every email, and
+its path (Results: <path>) is printed first. Ctrl+C stops this command, not a
+batch already sent: that batch still runs. --resume picks up from the results
+file.
+
+  --leads <list.csv>           The lead list. The results go next to it as
+                               <list>-amdahl-sequence.csv: every column of the
+                               list, then each email's columns (amdahl_subject,
+                               amdahl_message, amdahl_subject_2,
+                               amdahl_message_2 ...), then amdahl_status.
+  --match <field>=<column>     Fill {{field}} from this column of the list.
+  --fallback <field>=<text>    Text for the people whose cell is empty.
+                               first_name starts as "there".
+  --same <field>=<text>        The same text for everyone.
+  --drop <field>               Leave the field out. Repeat any of these four.
+  --for <tool>                 Also write <list>-<tool>.csv, a file your
+                               sequencer imports with a column for each email,
+                               and say how. The tools are the ones optimize
+                               --list --for takes, for email.
+  --force                      Replace the results file, and a --for file.
+  --resume                     Pick up where a run stopped, also after Ctrl+C
+                               or a timeout. It reads the results file: people
+                               with every email are kept, and the others
+                               continue from their first empty email. Use the
+                               same emails and flags.
+
+A field with no column and no flag asks at a terminal, and is refused anywhere
+else before anything is sent. An existing results file is not replaced without
+--force or --resume. --csv and --context do not go with --leads. A batch
+refused as rate limited is sent once more after the wait the server asks for
+(60 seconds at most, 10 with no number). A batch that got no answer is sent
+once more with the same key, so Amdahl does not bill it twice. A refusal for
+the monthly limit says how many runs are left, and stops. Rows that share an
+email address are still written, and counted before the start question.
+
+With --json it prints {"ok", "mode", "people", "written", "file", "left_out",
+"duplicates", "stopped", "rows"}, and "halted" when a batch was refused and
+"send_to" with --for. It also writes the results file. .file is that file.
+.left_out has .over_cap (people past the first 500) and .empty_rows.
+.duplicates counts rows that share an email. .stopped has .row, .email,
+.at_email and .reason. Each of .rows has .row, .emails (each {subject,
+message}, or null) and .status. .halted has .at_email and .reason. .send_to has
+.tool, .channel, .file, .ready, .left_out and .over_limit.
 
 The recipes behind it are in the cookbook,
 https://github.com/amdahlco/amdahl-cookbook, in prompts/agent-platform/

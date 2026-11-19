@@ -7,6 +7,8 @@
 //   amdahl sequence <file|->         improve the emails in a text, markdown or CSV file
 //   amdahl sequence --write "<goal>" write a new sequence, 2 to 6 emails, from a plan
 //   amdahl sequence                  at a terminal: pick one of the two, then answer
+//   amdahl sequence <file> --leads <list.csv>   a sequence for each person in a lead list
+//                                    (see sequence-leads.ts)
 //
 // Every email is checked before the first request, so a typo costs nothing.
 // The emails print one at a time as each comes back (the text on stdout, what
@@ -25,6 +27,7 @@ import { DEFAULT_STEPS, GOAL_CHARS, MAX_RULES, MAX_STEPS, MIN_STEPS, STARTERS, p
 import { MAX_EMAILS, emailProblem, emailsFromCsv, sequenceCsv, sequenceFileName, splitSequence, type SeqEmail } from '../sequence-parse'
 import { atTerminal, canAsk } from '../terminal'
 import { credentialOrSignIn, requestOptions } from './optimize'
+import { checkLeadsFlags, readLeadsFile, sequenceLeads } from './sequence-leads'
 import { failureLine, fieldLines, jsonDocument, runSequence, type Job } from './sequence-run'
 
 const PASTE_PROMPT = 'Paste your emails, with a line of --- between them, then press Enter on an empty line:'
@@ -193,7 +196,9 @@ export async function sequence(ctx: Ctx, args: string[]): Promise<number> {
   const writeFlag = typeof flags.write === 'string' ? flags.write : undefined
   if (file !== undefined && writeFlag !== undefined) throw usageError('Give the emails to improve, or --write "<goal>", not both.')
   if (writeFlag === undefined && (flags.emails !== undefined || flags.plan !== undefined)) throw usageError('--emails and --plan go with --write "<goal>".')
-  if (flags.force === true && typeof flags.csv !== 'string') throw usageError('--force goes with --csv.')
+  checkLeadsFlags(ctx, file, writeFlag)
+  const leads = typeof flags.leads === 'string' ? readLeadsFile(ctx) : null
+  if (flags.force === true && typeof flags.csv !== 'string' && !leads) throw usageError('--force goes with --csv.')
   const bare = file === undefined && writeFlag === undefined
   checkCsvTarget(ctx, file, writeFlag !== undefined)
   // An agent, CI, a pipe and --json cannot be asked: they get the usage.
@@ -215,6 +220,8 @@ export async function sequence(ctx: Ctx, args: string[]): Promise<number> {
     emails = await readEmails(ctx, file as string)
     checkEmails(emails, file === '-' ? 'The input has' : 'This file has')
   }
+
+  if (leads) return sequenceLeads(ctx, { file: file ?? null, emails, plan, base: request.base }, leads)
 
   const target = csvTarget(ctx, file ?? null)
   if (target) assertFree(target, flags.force === true)

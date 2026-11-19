@@ -244,7 +244,7 @@ function quoteCell(value: string): string {
   return /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
 }
 
-const cell = (value: string) => quoteCell(FORMULA.test(value) ? `'${value}` : value)
+export const cell = (value: string) => quoteCell(FORMULA.test(value) ? `'${value}` : value)
 
 /** The CSV a person saves: Email, Subject, Message; one row for each email; CRLF; no `<unverified>` marker. */
 export function sequenceCsv(emails: FinalEmail[]): string {

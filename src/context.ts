@@ -172,7 +172,7 @@ export function apiClient(ctx: Ctx, credential: Credential): AmdahlClient {
 }
 
 /** Pull `details` from a server error body, when it sent any. */
-function errorDetails(body: string | undefined): Record<string, unknown> {
+export function errorDetails(body: string | undefined): Record<string, unknown> {
   if (!body) return {}
   try {
     const parsed = JSON.parse(body) as { error?: { details?: unknown }; details?: unknown }
