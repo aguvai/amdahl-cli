@@ -15,7 +15,7 @@ import { toCliError, type Credential, type Ctx } from '../context'
 import { CliError, EXIT } from '../errors'
 import { rememberRun } from '../history'
 import { planRules, type PlanStep } from '../sequence-plan'
-import { emailText, finalEmail, lostFields, sentMessage, touchOf, type FinalEmail, type SeqEmail } from '../sequence-parse'
+import { emailText, finalEmail, lostFields, sentMessage, showsSubject, touchOf, type FinalEmail, type SeqEmail } from '../sequence-parse'
 import { field, incompleteLine, records } from '../text'
 import { optimizeOne, whatAmdahlDid } from './optimize'
 
@@ -86,6 +86,12 @@ function needsInputLine(n: number, result: Record<string, unknown>, kept: boolea
   return kept ? `${first} Kept your draft.` : first
 }
 
+/** A reply keeps no subject, so a subject line the writer added is not shown as a change either. */
+function withoutAddedSubject(result: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(result.changes)) return result
+  return { ...result, changes: records(result.changes).filter((row) => !(row.before == null && /^\s*subject\s*:/i.test(field(row.after)))) }
+}
+
 /** The stderr lines of one email: what changed, a kept draft, a question, and what must be checked. */
 function noteLines(n: number, result: Record<string, unknown>, needsInput: boolean, writing: boolean): string[] {
   if (needsInput) return [needsInputLine(n, result, !writing)]
@@ -127,7 +133,7 @@ export async function runSequence(ctx: Ctx, credential: Credential, job: Job): P
   for (let i = 0; i < total; i++) {
     const n = i + 1
     const email = job.emails[i] as SeqEmail
-    if (!out.json && io.stderrIsTTY) out.info(`Amdahl is ${writing ? 'writing' : 'improving'} email ${n} of ${total}.`)
+    if (!out.json && io.stderrIsTTY) out.info(`Amdahl is ${writing ? 'writing' : 'improving'} email ${n} of ${total}.${i === 0 ? ' Each email can take a minute.' : ''}`)
     const context = contextFor(job, i, finals)
     let result: Record<string, unknown>
     try {
@@ -157,7 +163,7 @@ export async function runSequence(ctx: Ctx, credential: Credential, job: Job): P
       const head = writing ? `Email ${n} of ${total}: ${job.plan?.steps[i]?.name.trim() || `Email ${n}`}` : `Email ${n} of ${total}`
       const text = needsInput && writing ? head : `${head}\n${emailText(final)}`
       out.result({}, `${i > 0 ? '\n' : ''}${text}`)
-      const notes = noteLines(n, result, needsInput, writing)
+      const notes = noteLines(n, showsSubject(email, i) ? result : withoutAddedSubject(result), needsInput, writing)
       if (notes.length) out.info(notes.join('\n'))
     }
   }

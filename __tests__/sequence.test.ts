@@ -121,7 +121,7 @@ describe('improving a sequence', () => {
     const r = await cli(io, 'sequence', path, '--no-color')
     expect(r.code).toBe(0)
     expect(r.stderr.split('\n')).toEqual([
-      'Amdahl is improving email 1 of 3.',
+      'Amdahl is improving email 1 of 3. Each email can take a minute.',
       'What Amdahl changed:',
       '  - "We are the leading onboarding platform."',
       '    Cut: nothing in your calls backs it.',
@@ -156,6 +156,17 @@ describe('improving a sequence', () => {
     const r = await cli(io, 'sequence', write(io, 'emails.md', SEQ), '--json')
     expect(r.json.emails[1]).toMatchObject({ index: 2, subject: null, message: TOUCH_2 })
     expect(bodies()[2]?.context).toMatchObject({ prior_touches: [{ summary: TOUCH_1 }, { summary: TOUCH_2 }] })
+  })
+
+  it('a reply does not show the subject it dropped as a change', async () => {
+    const changes = [
+      { before: null, after: 'Subject: Re: bump', why: 'Added a subject.' },
+      { before: 'Hi {{first_name}}, bumping this up.', after: 'Hi {{first_name}}, one more reason to talk.', why: 'A new reason, not a bump.' },
+    ]
+    const io = await withKey({ optimizeAnswer: answers({ 1: (plain) => ({ ...plain, message: `Subject: Re: bump\n\n${String(plain.message)}`, changes }) }) })
+    const r = await cli(io, 'sequence', write(io, 'emails.md', SEQ))
+    expect(r.stderr).not.toContain('Subject: Re: bump')
+    expect(r.stderr).toContain('  + "Hi {{first_name}}, one more reason to talk."\n    Why: A new reason, not a bump.')
   })
 
   it('a touch is cut to 500 characters, and an <unverified> marker is not kept', async () => {
