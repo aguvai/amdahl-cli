@@ -30,7 +30,7 @@ describe('PKCE and state', () => {
       { redirectUri: 'http://127.0.0.1:5/callback', pkce: p, workspace: 'acme' }
     )
     expect(url).toBe(
-      'https://x/oauth/authorize?response_type=code&client_id=amdahl-cli&redirect_uri=http%3A%2F%2F127.0.0.1%3A5%2Fcallback&code_challenge=c&code_challenge_method=S256&state=s&scope=data%3Aread%20connections%3Aread%20messages%3Aexecute&workspace=acme'
+      'https://x/oauth/authorize?response_type=code&client_id=amdahl-cli&redirect_uri=http%3A%2F%2F127.0.0.1%3A5%2Fcallback&code_challenge=c&code_challenge_method=S256&state=s&scope=data%3Aread%20connections%3Aread%20messages%3Aexecute%20sequencers%3Apush&workspace=acme'
     )
   })
 })

@@ -33,7 +33,7 @@ describe('login -> keys -> logout', () => {
       profile: 'acme',
       user: { id: expect.any(String), email: 'dev@example.com' },
       workspace: { id: BIZ, name: 'Acme', slug: 'acme' },
-      scopes: ['data:read', 'connections:read', 'messages:execute'],
+      scopes: ['data:read', 'connections:read', 'messages:execute', 'sequencers:push'],
       api_url: server.url,
     })
     const openEvent = login.stderr.split('\n').find((l) => l.includes('"open_url"'))

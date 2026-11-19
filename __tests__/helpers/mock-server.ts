@@ -196,6 +196,27 @@ export interface MockOptions {
   batchReadRefuse?: { status: number; code: string; message: string }
   /** With `batchReadRefuse`: refuse the reads of only these batches, by the order they were sent from 1. */
   batchReadRefuseOnly?: number[]
+  /** Connected sequencers, listed after the connections; their campaigns are SEQUENCER_CAMPAIGNS. */
+  sequencers?: { id: string; type: string; name: string }[]
+  /** After this many pushes, a push answers 409 campaign_active, as when someone starts the campaign mid-command. */
+  pushesBeforeLive?: number
+  /** The sequencer routes answer as the server's `pushCallerOf` does for a key whose grant does not name sequencers:push: 403 `scope_not_granted`, `details.required_scope`. */
+  scopeNotGranted?: boolean
+}
+
+/** Every sequencer's campaigns in the mock, as `GET /connections/:id/campaigns` returns them. */
+export const SEQUENCER_CAMPAIGNS = [
+  { id: 'camp-paused', name: 'Q4 founders', status: 'paused', url: null },
+  { id: 'camp-draft', name: 'Draft run', status: 'draft', url: null },
+  { id: 'camp-live', name: 'Live run', status: 'active', url: null },
+]
+
+/** One push the mock took: the request body and the push id it answered. */
+export interface MockPush {
+  connection: string
+  campaign: string
+  body: { leads: Record<string, unknown>[]; idempotency_key: string }
+  push_id: string
 }
 
 export interface MockServer {
@@ -206,6 +227,8 @@ export interface MockServer {
   issued: { access: string[]; refresh: string[] }
   revoked: string[]
   keyRequests: Map<string, Record<string, unknown>>
+  /** Every sequencer push the server took. */
+  pushes: MockPush[]
   close: () => Promise<void>
 }
 
@@ -232,6 +255,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
   let workspaceCreated = false
   let refusals = 0
   const codes = new Map<string, { challenge: string; redirectUri: string }>()
+  const pushes: MockPush[] = []
   const keys = [
     {
       id: '33333333-3333-4333-8333-333333333333',
@@ -302,7 +326,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
           q.get('client_id') !== 'amdahl-cli' ||
           q.get('response_type') !== 'code' ||
           q.get('code_challenge_method') !== 'S256' ||
-          q.get('scope') !== 'data:read connections:read messages:execute' ||
+          q.get('scope') !== 'data:read connections:read messages:execute sequencers:push' ||
           !/^http:\/\/127\.0\.0\.1:\d+\/callback$/.test(redirectUri)
         ) {
           return json(res, 400, { error: 'invalid_request' })
@@ -397,7 +421,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
         return json(res, 200, {
           user_id: USER,
           business_id: BIZ,
-          scopes: options.scopes ?? ['data:read', 'connections:read', 'messages:execute'],
+          scopes: options.scopes ?? ['data:read', 'connections:read', 'messages:execute', 'sequencers:push'],
           auth_method: kind,
           email: 'dev@example.com',
           workspace: { id: BIZ, name: options.workspaceName ?? 'Acme', slug: 'acme' },
@@ -511,12 +535,50 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
 
       if (path === '/api/platform/v1/connections' && req.method === 'GET') {
         if (options.connectionsError) return err(res, 500, 'internal_error', 'Could not read the connections.')
+        const seq = (options.sequencers ?? []).map((c) => ({ id: c.id, connector_type: c.type, connector: { type: c.type, name: c.name, category: 'sequencer' }, name: c.name, status: 'connected', health: 'healthy', last_synced_at: null }))
+        if (seq.length) return json(res, 200, { data: [...(options.connections ?? []), ...seq] })
         return json(res, 200, {
           data: options.connections ?? [
             { id: 'c0', connector_type: 'hubspot', connector: { type: 'hubspot', name: 'HubSpot', category: 'crm' }, name: 'HubSpot', status: 'connected', health: 'healthy', last_synced_at: '2026-11-11T08:00:00Z' },
             { id: 'c1', connector_type: 'gong', connector: { type: 'gong', name: 'Gong', category: 'calls' }, name: 'Sales calls', status: 'error', health: 'needs_reauth', last_synced_at: null },
           ],
         })
+      }
+
+      // The sequencer push routes, with the rules the server holds for a key or a sign-in.
+      const seqPath = path.match(/^\/api\/platform\/v1\/connections\/([^/]+)\/(campaigns|pushes)(?:\/([^/]+))?(\/leads)?$/)
+      if (seqPath) {
+        if (kind === 'readonly') return err(res, 403, options.forbiddenCode ?? 'forbidden', 'Missing required scope(s): sequencers:push')
+        if (options.scopeNotGranted) {
+          return json(res, 403, {
+            error: {
+              code: 'scope_not_granted',
+              message: 'This key does not name sequencers:push. A Full admin or older key does not carry it. Create a key with Sequencers: push added.',
+              details: { required_scope: 'sequencers:push' },
+            },
+          })
+        }
+        const [, connId, what, sub, leadsPart] = seqPath
+        if (!(options.sequencers ?? []).some((c) => c.id === connId)) return err(res, 404, 'not_found', 'Connection not found.')
+        if (what === 'campaigns' && !sub && req.method === 'GET') return json(res, 200, { data: { campaigns: SEQUENCER_CAMPAIGNS } })
+        if (what === 'campaigns' && sub && leadsPart && req.method === 'POST') {
+          const input = JSON.parse(body) as MockPush['body']
+          const campaign = SEQUENCER_CAMPAIGNS.find((c) => c.id === sub)
+          if (!campaign) return err(res, 404, 'not_found', 'Campaign not found.')
+          if (!Array.isArray(input.leads) || input.leads.length === 0 || input.leads.length > 100) return err(res, 400, 'too_many_leads', 'An API key or an agent can add up to 100 leads in one call.')
+          if (campaign.status === 'active' || (options.pushesBeforeLive !== undefined && pushes.length >= options.pushesBeforeLive)) return err(res, 409, 'campaign_active', 'This campaign is live.')
+          const known = pushes.find((p) => p.connection === connId && p.body.idempotency_key === input.idempotency_key)
+          if (known) return json(res, 202, { data: { push_id: known.push_id } })
+          const push_id = `66666666-6666-4666-8666-${String(pushes.length + 1).padStart(12, '0')}`
+          pushes.push({ connection: connId ?? '', campaign: sub, body: input, push_id })
+          return json(res, 202, { data: { push_id } })
+        }
+        if (what === 'pushes' && sub && req.method === 'GET') {
+          const push = pushes.find((p) => p.push_id === sub)
+          if (!push) return err(res, 404, 'not_found', 'Push not found.')
+          const n = push.body.leads.length
+          return json(res, 200, { data: { status: 'done', counts: { added: n, skipped: 0, failed: 0 }, items: push.body.leads.map((_, index) => ({ index, status: 'added', reason: null })) } })
+        }
       }
 
       if (path === '/api/platform/v1/connections/catalog' && req.method === 'GET') {
@@ -909,6 +971,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
     issued,
     revoked,
     keyRequests,
+    pushes,
     close: () =>
       new Promise((r) => {
         server.closeAllConnections()

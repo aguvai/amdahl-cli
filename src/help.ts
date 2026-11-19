@@ -446,6 +446,38 @@ Open this workspace in the console.
   --no-browser   Print the link instead of opening a browser.
 `,
 
+  'sequencers campaigns': `Usage: amdahl sequencers campaigns [<connection>]
+
+List the campaigns of a sequencer the workspace connected in the console
+(Instantly, Smartlead, lemlist, HeyReach or Amplemarket), read live: id, name
+and status. Name the connection by its id or its type (instantly) when the
+workspace has more than one.
+`,
+
+  'sequencers push': `Usage: amdahl sequencers push <file|batch-id> --campaign <id>
+                              [--connection <id|type>] [--list <file>]
+                              [--channel email|linkedin] [--yes]
+
+Add leads, each with the message Amdahl wrote, to a paused or draft campaign.
+It shows the campaign's name and status and how many leads it adds, then asks.
+Amdahl adds the leads only: it never starts the campaign or sends an email.
+
+  <file>            A CSV or JSONL file with an amdahl_message column, and an
+                    email or linkedin_url for each lead. amdahl optimize
+                    --list <list> --for other writes one.
+  <batch-id>        A finished batch. Name its list with --list.
+  --campaign <id>   The campaign (amdahl sequencers campaigns lists them).
+  --connection      The sequencer, when the workspace has more than one.
+  --channel         email or linkedin, for a batch list with no channel column.
+  --yes             Add without asking, for a script. With no terminal and no
+                    --yes, nothing is added.
+
+Up to 100 leads go in one call, and up to 1,000 in one command. The same
+command run again adds nothing twice. It needs the sequencers:push permission:
+a sign-in made with this version has it, and a key has it only when it was
+created in the console with Add leads to sequencer campaigns.
+`,
+
   feedback: `Usage: amdahl feedback <run-id> --evidence did_it_myself|reported_to_me|inferred
                        [--outcome used|used_with_edits|not_used|unsure]
                        [--sent-text <file> | -] [--comment <text>]
@@ -602,6 +634,7 @@ const GROUPS: Record<string, string[]> = {
   auth: ['login', 'logout', 'whoami', 'auth token'],
   workspace: ['workspace list', 'workspace use'],
   skills: ['skills add'],
+  sequencers: ['sequencers campaigns', 'sequencers push'],
 }
 
 /** A command word by another name. */

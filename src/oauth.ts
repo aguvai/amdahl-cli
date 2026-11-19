@@ -18,7 +18,7 @@ import type { Secrets } from './secrets'
 export const CLI_OAUTH_CLIENT_ID = 'amdahl-cli'
 
 /** The scopes the CLI asks for (the server clamps to these). */
-export const CLI_OAUTH_SCOPES = ['data:read', 'connections:read', 'messages:execute']
+export const CLI_OAUTH_SCOPES = ['data:read', 'connections:read', 'messages:execute', 'sequencers:push']
 
 /** The endpoints the CLI uses from the discovery document. */
 export interface OAuthEndpoints {

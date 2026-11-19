@@ -322,7 +322,7 @@ async function waitForBatch(ctx: Ctx, credential: Credential, id: string, first:
 }
 
 /** Every item of a completed batch, page by page. */
-async function allItems(ctx: Ctx, credential: Credential, id: string): Promise<{ batch: Record<string, unknown>; items: Record<string, unknown>[] }> {
+export async function allItems(ctx: Ctx, credential: Credential, id: string): Promise<{ batch: Record<string, unknown>; items: Record<string, unknown>[] }> {
   const client = apiClient(ctx, credential)
   const items: Record<string, unknown>[] = []
   let cursor: string | null = null

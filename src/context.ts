@@ -185,6 +185,8 @@ export function errorDetails(body: string | undefined): Record<string, unknown> 
 
 /** What each call does, said as a verb, for "This credential cannot <verb>." Longest path first. */
 const CALL_VERBS: [string, string][] = [
+  ['/campaigns', 'add leads to a sequencer campaign'],
+  ['/pushes/', 'add leads to a sequencer campaign'],
   ['/messages/optimize/batch', 'optimize a list'],
   ['/messages/optimize_prompt', 'grade or improve a prompt'],
   ['/feedback', 'record feedback'],
@@ -200,13 +202,16 @@ const CALL_VERBS: [string, string][] = [
 ]
 
 /**
- * The scopes a refusal names: the server's `error.details.missing_scopes`, else
+ * The scopes a refusal names: the server's `error.details.missing_scopes`, or
+ * the one `error.details.required_scope` of a `scope_not_granted` refusal, else
  * the list in its `Missing required scope(s): a, b` message (servers before the
- * field). Empty when neither says.
+ * field). Empty when none says.
  */
 function missingScopes(err: AmdahlApiError): string[] {
-  const listed = errorDetails(err.responseBody).missing_scopes
+  const details = errorDetails(err.responseBody)
+  const listed = details.missing_scopes
   if (Array.isArray(listed)) return listed.filter((s): s is string => typeof s === 'string' && s.length > 0)
+  if (typeof details.required_scope === 'string' && details.required_scope.length > 0) return [details.required_scope]
   const match = /^Missing required scope\(s\):\s*(.+?)\.?$/i.exec(err.message)
   return match ? match[1]!.split(/,\s*/).map((s) => s.trim()).filter(Boolean) : []
 }
@@ -227,9 +232,11 @@ const AGENT_ONLY_SCOPES = new Set([
 
 /**
  * The sentence for a credential that lacks a scope: which permission is
- * missing, what it stops, and the command that makes a key that has it. A key
- * made with no `--preset` can optimize and search; research and workspace
- * changes need `--preset agent`.
+ * missing, what it stops, and how to get a key that has it. A key made with no
+ * `--preset` can optimize and search; research and workspace changes need
+ * `--preset agent`. No preset carries `sequencers:push` and `keys create`
+ * cannot add it, so for that scope the sentence names the console's Create key
+ * option instead (a sign-in from this version asks for it).
  */
 export function missingScopeMessage(verb: string, scopes: readonly string[]): string {
   const agent = scopes.some((s) => AGENT_ONLY_SCOPES.has(s))
@@ -239,6 +246,10 @@ export function missingScopeMessage(verb: string, scopes: readonly string[]): st
     return `This credential cannot ${verb}. Make a key that can: \`${make}\`, or run \`${login}\` again.`
   }
   const which = `the ${scopes.join(' and ')} permission${scopes.length > 1 ? 's' : ''}`
+  if (scopes.includes('sequencers:push')) {
+    const preset = agent ? 'the Customer agent preset and ' : ''
+    return `This credential is missing ${which}, so it cannot ${verb}. Run \`${login}\` again, or use a key created in the console with ${preset}Add leads to sequencer campaigns turned on.`
+  }
   return `This credential is missing ${which}, so it cannot ${verb}. Make a key that has it: \`${make}\`, or run \`${login}\` again.`
 }
 
@@ -258,7 +269,9 @@ function plainMessage(err: AmdahlApiError): string | null {
     const noun = err.credentialSource === 'env:AMDAHL_ACCESS_TOKEN' ? 'token' : 'key'
     return `This ${noun} isn't valid (revoked or expired).`
   }
-  if (err.errorCode === 'missing_scope' || /^Missing required scope/i.test(err.message)) {
+  // `scope_not_granted`: a key whose grant does not name a scope that must be named, such as
+  // sequencers:push on a Full admin or older key (amdahl-app `sequencerPush/callerRules.ts`).
+  if (err.errorCode === 'missing_scope' || err.errorCode === 'scope_not_granted' || /^Missing required scope/i.test(err.message)) {
     const verb = CALL_VERBS.find(([prefix]) => err.path.includes(prefix))?.[1] ?? 'do this'
     return missingScopeMessage(verb, missingScopes(err))
   }
