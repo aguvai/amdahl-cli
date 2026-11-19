@@ -296,7 +296,7 @@ Amdahl adds the leads only: it never starts the campaign or sends an email.
 Up to 100 leads go in one call, and up to 1,000 in one command. The same
 command run again adds nothing twice. It needs the sequencers:push permission:
 a sign-in made with this version has it, and a key has it only when it was
-created with Add leads to sequencer campaigns.
+created in the console with Add leads to sequencer campaigns.
 `,
 
   feedback: `Usage: amdahl feedback <run-id> --evidence did_it_myself|reported_to_me|inferred
@@ -363,15 +363,20 @@ flag, --channel too, is a usage error.
 ${GLOBAL}`,
 
   'keys create': `Usage: amdahl keys create --name <name>
-                          [--preset read-only|agent|internal|admin]
+                          [--preset optimize|read-only|agent|internal|admin]
                           [--expires 30d|90d|365d] [--no-browser]
 
 Make an API key for a server or CI. You approve it in the console, then the key
 is printed once. It needs your own sign-in.
 
   --name <name>    What to call the key. Required.
-  --preset <kind>  read-only (default), agent (reads, optimize and research),
-                   internal or admin (workspace admins only).
+  --preset <kind>  optimize (default): search, reads, and writing and grading
+                   messages. Changes no workspace settings or data.
+                   read-only: search and reads, no changes.
+                   agent: optimize, plus research and paid web search, and it
+                   can change and delete workspace settings, context, evals
+                   and tracked accounts, and email workspace members.
+                   internal or admin: workspace admins only.
   --expires <days> 30d, 90d (default) or 365d.
   --no-browser     Print the approval link instead of opening a browser.
 `,

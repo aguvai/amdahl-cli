@@ -47,8 +47,11 @@ describe('amdahl sequencers campaigns', () => {
     const io = await withKey(READONLY_KEY)
     const r = await cli(io, 'sequencers', 'campaigns')
     expect(r.code).toBe(4)
-    expect(r.stderr).toContain('cannot add leads to a sequencer campaign')
-    expect(r.stderr).toContain('Add leads to sequencer campaigns')
+    // No preset carries sequencers:push and `keys create` cannot add it, so the sentence names the console option.
+    expect(r.stderr).toBe(
+      'Error: This credential is missing the sequencers:push permission, so it cannot add leads to a sequencer campaign. Run `amdahl login` again, or use a key created in the console with Add leads to sequencer campaigns turned on.\n'
+    )
+    expect(r.stderr).not.toContain('keys create')
   })
 
   it('says when no sequencer is connected', async () => {
