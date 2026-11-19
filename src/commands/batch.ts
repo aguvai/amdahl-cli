@@ -266,6 +266,13 @@ export function progressKey(batch: Record<string, unknown>): string {
   return ['total', 'queued', 'running', 'done', 'failed'].map((k) => (typeof c[k] === 'number' ? c[k] : 0)).join('/')
 }
 
+/** The server's estimate as `, about 3 min left`, or nothing when it sent none. */
+export function leftText(batch: Record<string, unknown>): string {
+  const eta = record(batch.eta)
+  const seconds = typeof eta?.seconds === 'number' ? eta.seconds : null
+  return seconds === null ? '' : seconds < 90 ? ', about a minute left' : `, about ${Math.round(seconds / 60)} min left`
+}
+
 /** One progress line: counts, and the server's estimate while items are left. */
 export function progressLine(batch: Record<string, unknown>): string {
   const c = record(batch.counts) ?? {}
@@ -273,9 +280,7 @@ export function progressLine(batch: Record<string, unknown>): string {
   const total = n('total')
   const finished = n('done') + n('failed')
   const failed = n('failed') ? `, ${n('failed')} failed` : ''
-  const eta = record(batch.eta)
-  const seconds = typeof eta?.seconds === 'number' ? eta.seconds : null
-  const left = seconds === null || finished === total ? '' : seconds < 90 ? ', about a minute left' : `, about ${Math.round(seconds / 60)} min left`
+  const left = finished === total ? '' : leftText(batch)
   if (finished === 0 && n('running') === 0) {
     const ahead = typeof batch.queue_position === 'number' && batch.queue_position > 0 ? ` behind ${count(batch.queue_position, 'item')}` : ''
     // Nothing has started, so it says only that: "0 of N done" is the next line's to say.

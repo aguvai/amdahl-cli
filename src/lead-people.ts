@@ -163,3 +163,13 @@ export function rowOfItem(itemId: unknown, index: number): number {
   const m = typeof itemId === 'string' ? /^row-(\d+)$/.exec(itemId) : null
   return m ? Number(m[1]) : index + 2
 }
+
+/** How many people share an email address with another person in the list (an empty address is no address). */
+export function sharedEmails(leads: readonly Lead[]): number {
+  const seen = new Map<string, number>()
+  for (const lead of leads) {
+    const key = lead.email.trim().toLowerCase()
+    if (key) seen.set(key, (seen.get(key) ?? 0) + 1)
+  }
+  return [...seen.values()].filter((c) => c > 1).reduce((sum, c) => sum + c, 0)
+}

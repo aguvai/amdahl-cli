@@ -903,6 +903,11 @@ With `--json` it prints one document: `ok`, `mode` (`improve` or `write`),
 when the run stopped), and, when a file was written, `file` and `saved` (how
 many emails it holds).
 
+Both modes (improve and `--write`) also take `--leads <list.csv>`, to write one
+sequence for each person in a lead list. That is the next part. `--resume`,
+`--for`, `--force` and the `--match`, `--fallback`, `--same` and `--drop` flags
+go with `--leads` only.
+
 ### A sequence for each person in a lead list
 
 ```sh
@@ -912,10 +917,16 @@ amdahl sequence --write "Book a first meeting." --leads leads.csv --for instantl
 
 `--leads` writes or improves the whole sequence for each person in the list
 (up to 500; the list needs an email, LinkedIn, or name and company column).
-Email 1 goes as one batch for everyone (`POST /messages/optimize/batch`), then
-email 2 as one batch for everyone whose email 1 came back, and so on. Each
-person's email 2 is written as a follow-up to their own email 1, never another
-person's. A person whose email fails stops there.
+Email 1 goes to Amdahl as a batch for everyone (`POST /messages/optimize/batch`),
+then email 2 for everyone whose email 1 came back, and so on. Each person's
+email 2 is written as a follow-up to their own email 1, never another person's.
+A person whose email fails stops there.
+
+The server takes at most 1 MB of JSON in one request. So an email is sent as
+several batches when one would pass about 900 KB (and never more than 500
+people in one). All batches of an email are read before the next email starts.
+A person whose own item is too big to send fails with that reason, and is not
+sent.
 
 Each fill-in field is matched to a column of the list, so `{{first_name}}`
 finds "First Name". At a terminal, Amdahl asks only about a real problem: a
@@ -935,13 +946,41 @@ their emails, and asks `Write for the other 49 people? [Y/n]`. A yes keeps the
 sample and writes the rest. An improved sequence asks once before it starts,
 with the number of runs. An agent, CI, a pipe or `--json` is not asked.
 
+Before it asks to start, it says how many rows were left out: empty rows, people
+past the first 500, and rows that share an email address with another row
+(those are still written).
+
 The results go to `<list>-amdahl-sequence.csv`: every column of the list, then
 `amdahl_subject` and `amdahl_message` for email 1, `amdahl_subject_2` and
 `amdahl_message_2` for email 2 and so on (a subject column only for an email
-with its own subject), then `amdahl_status`. `--for <tool>` also writes the
-import file for that sequencer, with each email's columns and the steps to map
-them. `--resume` picks each person up from their first unwritten email, from
-the results file. `--force` starts again.
+with its own subject), then `amdahl_status`. The file is the only copy of the
+text. It is written before the first batch and again after every email, each
+time as a temp file that is then renamed, so it is never half written. The
+first line on stdout is `Results: <path>`, printed before the first batch; the
+summary goes to stderr when the run ends. Ctrl+C stops the CLI, not a batch
+already sent: that batch still runs on Amdahl's side. Run the same command with
+`--resume` and it picks each person up from their first unwritten email, from
+the file, so nothing is lost after Ctrl+C or a timeout. `--force` starts again.
+`--resume` and `--force` do not go together.
+
+`--for <tool>` also writes the import file for that sequencer
+(`<list>-<tool>.csv`), with each email's columns and the steps to map them.
+
+If a batch is refused, the run stops and keeps what finished. A refusal as rate
+limited is tried once more after the wait the server asks for (at most 60
+seconds, 10 with no number). A batch that got no answer at all is sent once
+more with the same `idempotency_key`, so Amdahl answers with the first batch
+and bills it once. A refusal for the monthly limit says how many runs are left,
+and offers no `--resume` line. Off a terminal, a progress line prints about once
+a minute and when an email finishes; at a terminal it is rewritten in place,
+with the queue and the estimate Amdahl sends.
+
+With `--json` it prints one document and the same file is still written:
+`ok`, `mode`, `people`, `written`, `file` (the results file), `left_out`
+(`over_cap` and `empty_rows`), `duplicates` (rows that share an email),
+`stopped` (`row`, `email`, `at_email`, `reason`), `rows` (`row`, `emails`,
+`status`), `halted` (`at_email` and `reason`, only when a batch was refused)
+and, with `--for`, `send_to`.
 
 The recipes behind it are in the cookbook:
 [improve a sequence](https://github.com/amdahlco/amdahl-cookbook/blob/main/prompts/agent-platform/improve-a-sequence.md)

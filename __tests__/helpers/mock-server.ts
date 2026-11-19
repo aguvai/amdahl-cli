@@ -70,6 +70,9 @@ export interface LoggedRequest {
   body: string
 }
 
+/** The most bytes of JSON the server's parser takes. */
+export const BODY_LIMIT = 1024 * 1024
+
 export interface MockOptions {
   /**
    * Answer authorize with `error=no_business` (and the self-serve `reason`,
@@ -178,7 +181,13 @@ export interface MockOptions {
   /** Items an `only_finished` read adds each time (the rest are still running). Unset: all finish together, after `batchPolls` reads. */
   batchFinishPerRead?: number
   /** The nth batch submitted (from 1) is refused, as the server refuses one over quota or scope. */
-  batchRefuse?: Record<number, { status: number; code: string; message: string }>
+  batchRefuse?: Record<number, { status: number; code: string; message: string; details?: Record<string, unknown>; retryAfter?: number }>
+  /** The nth batch submitted (from 1) is queued, and then the connection is cut with no answer, as a dropped network does. A resend with the same `idempotency_key` gets the first batch back, `replayed: true`. */
+  batchDrop?: number[]
+  /** Called as the nth batch is submitted (from 1), before the answer, with the request's JSON body. */
+  onBatch?: (position: number, body: string) => void
+  /** Every read of a batch is answered with this error. */
+  batchReadRefuse?: { status: number; code: string; message: string }
 }
 
 export interface MockServer {
@@ -202,6 +211,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
   const keyRequests = new Map<string, Record<string, unknown>>()
   const batches = new Map<string, { items: Record<string, unknown>[]; polls: number; finished: number }>()
   let batchPosts = 0
+  const byKey = new Map<string, string>()
   // Run ids this workspace has, and when each was made.
   const runs = new Map<string, number>([[KNOWN_RUN, Date.now() - 3_600_000]])
   // What a run was sent and what came back, for the runs the mock made.
@@ -261,6 +271,8 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
       const url = new URL(req.url ?? '/', base)
       const path = url.pathname
       log.push({ method: req.method ?? 'GET', path, query: url.search, headers: req.headers, body })
+      // The server's JSON parser takes 1 MB at most, and answers an over-size body with this 413.
+      if (Buffer.byteLength(body) > BODY_LIMIT) return json(res, 413, { error: 'payload_too_large', message: 'Request body too large. The maximum upload size is 1MB.', limit_bytes: BODY_LIMIT })
       const form = () => {
         if (!String(req.headers['content-type']).startsWith('application/x-www-form-urlencoded')) return null
         return new URLSearchParams(body)
@@ -507,15 +519,24 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
       }
 
       if (path === '/api/platform/v1/messages/optimize/batch' && req.method === 'POST') {
-        const input = JSON.parse(body) as { items?: Record<string, unknown>[] }
-        const refuse = options.batchRefuse?.[++batchPosts]
-        if (refuse) return err(res, refuse.status, refuse.code, refuse.message)
+        const input = JSON.parse(body) as { items?: Record<string, unknown>[]; idempotency_key?: string }
+        const position = ++batchPosts
+        options.onBatch?.(position, body)
+        const refuse = options.batchRefuse?.[position]
+        if (refuse) {
+          const headers: Record<string, string | number> = { 'Content-Type': 'application/json', ...(refuse.retryAfter === undefined ? {} : { 'Retry-After': refuse.retryAfter }) }
+          return void res.writeHead(refuse.status, headers).end(JSON.stringify({ error: { code: refuse.code, message: refuse.message, ...(refuse.details ? { details: refuse.details } : {}) } }))
+        }
+        const first = input.idempotency_key ? byKey.get(input.idempotency_key) : undefined
+        if (first) return json(res, 202, { data: { ok: true, replayed: true, ...batchSummary(first, batches.get(first)?.items ?? [], false) } })
         const problems = batchProblems(input)
         if (problems.length) return json(res, 400, { error: { code: 'invalid_input', message: `Input failed schema validation: ${problems[0]}`, details: { errors: problems } } })
         const items = input.items ?? []
         const id = `77777777-7777-4777-8777-${String(++n).padStart(12, '0')}`
         batches.set(id, { items, polls: 0, finished: 0 })
+        if (input.idempotency_key) byKey.set(input.idempotency_key, id)
         items.forEach((_, index) => runs.set(batchRun(index), Date.now()))
+        if (options.batchDrop?.includes(position)) return void req.socket.destroy()
         return json(res, 202, { data: { ok: true, replayed: false, ...batchSummary(id, items, false) } })
       }
 
@@ -524,6 +545,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
         // A malformed id and an unknown id are one not-found, as on the real route.
         const entry = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(batch[1] ?? '') ? batches.get(batch[1] ?? '') : undefined
         if (!entry) return err(res, 404, 'not_found')
+        if (options.batchReadRefuse) return err(res, options.batchReadRefuse.status, options.batchReadRefuse.code, options.batchReadRefuse.message)
         entry.polls++
         const reads = options.batchPolls ?? 1
         const finishedMode = ['true', '1'].includes(url.searchParams.get('only_finished') ?? '') || url.searchParams.has('finished_since')

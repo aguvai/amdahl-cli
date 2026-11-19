@@ -14,7 +14,7 @@
 // The text of an email is never stored: the results file is the export.
 
 import { usageError } from './errors'
-import { leadItem, leadLabel, type Lead, type LeadTable } from './lead-people'
+import { MAX_LEADS, leadItem, leadLabel, type Lead, type LeadTable } from './lead-people'
 import { cell, finalEmail, sentMessage, showsSubject, touchOf, type FinalEmail, type SeqEmail } from './sequence-parse'
 import { fillFor, type FieldMatch } from './sequence-fields'
 import { planRules, type PlanStep } from './sequence-plan'
@@ -43,6 +43,39 @@ export function personItem(src: PeopleSource, k: number, lead: Lead, table: Lead
   const touches = earlier.map((f) => touchOf(f)).filter((t) => t.summary)
   if (touches.length === 0) return item
   return { ...item, context: { ...(item.context as Record<string, unknown> | undefined), prior_touches: touches } }
+}
+
+/** The most JSON bytes one batch request carries. The server refuses a body over 1 MB, so this keeps a margin. */
+export const BODY_LIMIT = 900_000
+
+const FRAME_BYTES = Buffer.byteLength(JSON.stringify({ items: [], idempotency_key: '0'.repeat(36) }))
+
+/**
+ * Split a step's items into requests, in order: each under {@link BODY_LIMIT}
+ * bytes of JSON (measured as sent) and at most 500 items. An item that passes
+ * the limit alone cannot be sent: it comes back in `tooBig`, not in a part.
+ */
+export function splitItems(items: Record<string, unknown>[]): { parts: Record<string, unknown>[][]; tooBig: Record<string, unknown>[] } {
+  const parts: Record<string, unknown>[][] = []
+  const tooBig: Record<string, unknown>[] = []
+  let part: Record<string, unknown>[] = []
+  let size = FRAME_BYTES
+  for (const item of items) {
+    const bytes = Buffer.byteLength(JSON.stringify(item))
+    if (FRAME_BYTES + bytes > BODY_LIMIT) {
+      tooBig.push(item)
+      continue
+    }
+    if (part.length > 0 && (part.length >= MAX_LEADS || size + 1 + bytes > BODY_LIMIT)) {
+      parts.push(part)
+      part = []
+      size = FRAME_BYTES
+    }
+    size += bytes + (part.length > 0 ? 1 : 0)
+    part.push(item)
+  }
+  if (part.length > 0) parts.push(part)
+  return { parts, tooBig }
 }
 
 /** The email a person gets back, or null when the writer asked questions instead of writing one (an improved email keeps what was typed). */

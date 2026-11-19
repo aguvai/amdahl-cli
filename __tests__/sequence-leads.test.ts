@@ -5,11 +5,25 @@
 // e2e-stub/optimizer-sequence-people.spec.ts, optimizer-sequence-write-people.spec.ts and
 // optimizer-sequence-send-to.spec.ts at commit d9a53a2b9).
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cli, fakeIo, type FakeIo } from './helpers/fake-io'
-import { API_KEY, startMockServer, type MockServer } from './helpers/mock-server'
+import { API_KEY, BODY_LIMIT, startMockServer, type MockServer } from './helpers/mock-server'
+
+// No real row makes one item pass the limit (an item is cut to fit, see lead-facts.ts), so one test
+// swells a single person's item to prove the guard: the real code builds it, then it is padded.
+const oversize: { row: string | null } = { row: null }
+vi.mock('../src/sequence-leads', async (original) => {
+  const real = await original<typeof import('../src/sequence-leads')>()
+  return {
+    ...real,
+    personItem: (...args: Parameters<typeof real.personItem>) => {
+      const item = real.personItem(...args)
+      return item.item_id === oversize.row ? { ...item, message: 'x'.repeat(950_000) } : item
+    },
+  }
+})
 
 let server: MockServer | null = null
 beforeEach(() => {
@@ -17,6 +31,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date(2026, 10, 18, 12))
 })
 afterEach(async () => {
+  oversize.row = null
   vi.useRealTimers()
   await server?.close()
   server = null
@@ -321,12 +336,13 @@ describe('writing a sequence for each person', () => {
     io.answers = ['', '', '']
     const r = await cli(io, 'sequence', '--write', 'Book a first meeting.', '--emails', '2', '--leads', file(io, 'leads.csv', LEADS))
     expect(r.code).toBe(0)
-    expect(io.prompts).toEqual(['Write these 2 emails? [Y/n]', 'Write for the other 1 person? [Y/n]'])
+    expect(io.prompts).toEqual(['Write these 2 emails? [Y/n]', 'Write 2 emails for the other person: up to 2 runs. Start? [Y/n]'])
     expect(batches().map((b) => b.map((i) => i.item_id))).toEqual([['row-2'], ['row-2'], ['row-3'], ['row-3']])
     expect(batches()[1]?.[0]?.context?.prior_touches).toEqual([touch('Subject: Opener 1 for Sam Lee\n\nWritten for Sam Lee.')])
     expect(batches()[3]?.[0]?.context?.prior_touches).toEqual([touch('Subject: Opener 1 for Park\n\nWritten for Park.')])
     expect(r.stdout).toBe(
       [
+        `Results: ${join(io.cwd, 'leads-amdahl-sequence.csv')}`,
         'Sample for Sam Lee:',
         '',
         'Email 1 of 2: Opener',
@@ -338,7 +354,6 @@ describe('writing a sequence for each person', () => {
         'Subject: Last try 2 for Sam Lee',
         '',
         'Written for Sam Lee after: Subject: Opener 1 for Sam Lee.',
-        `Results: ${join(io.cwd, 'leads-amdahl-sequence.csv')}`,
         '',
       ].join('\n')
     )
@@ -381,8 +396,8 @@ describe('at a terminal', () => {
         '{{company}}: from column "Company".',
         '{{first_name}}: from column "First Name", "there" where it is empty.',
         '{{icebreaker}}: from column "Notes".',
-        line('Email 1 of 2: 0 of 2 people done.') + line('Email 1 of 2: 1 of 2 people done.') + line('Email 1 of 2: 2 of 2 people done.'),
-        line('Email 2 of 2: 0 of 2 people done.') + line('Email 2 of 2: 1 of 2 people done.') + line('Email 2 of 2: 2 of 2 people done.'),
+        line('Email 1 of 2: 0 of 2 people done.') + line('Email 1 of 2: 1 of 2 people done, about 4 min left.') + line('Email 1 of 2: 2 of 2 people done.'),
+        line('Email 2 of 2: 0 of 2 people done.') + line('Email 2 of 2: 1 of 2 people done, about 4 min left.') + line('Email 2 of 2: 2 of 2 people done.'),
         'Wrote 2 emails for 2 of 2 people.',
         '',
       ].join('\n')
@@ -485,23 +500,27 @@ describe('--for', () => {
 })
 
 describe('--json', () => {
-  it('prints one document instead of the results file', async () => {
+  it('prints one document, with the results file it also wrote, and what was left out', async () => {
     const io = await withKey({ batchResults: failing(['jo@example.com'], 2) })
     const r = await cli(io, 'sequence', file(io, 'emails.md', EMAILS), '--leads', file(io, 'leads.csv', LEADS), '--json')
     expect(r.code).toBe(1)
     expect(r.stderr).toBe('')
+    const out = join(io.cwd, 'leads-amdahl-sequence.csv')
     expect(r.json).toEqual({
       ok: false,
       mode: 'improve',
       people: 2,
       written: 1,
+      file: out,
+      left_out: { over_cap: 0, empty_rows: 0 },
+      duplicates: 0,
       stopped: [{ row: 3, email: 'jo@example.com', at_email: 2, reason: 'took too long' }],
       rows: [
         { row: 2, emails: [{ subject: 'Ramping at Acme!', message: 'Better: Hi Sam, most teams take 4 months.' }, { subject: null, message: 'Better: Hi Sam, bumping this up.' }], status: 'written' },
         { row: 3, emails: [{ subject: 'Ramping at Northwind!', message: 'Better: Hi there, most teams take 4 months.' }, null], status: 'email 2 failed' },
       ],
     })
-    expect(existsSync(join(io.cwd, 'leads-amdahl-sequence.csv'))).toBe(false)
+    expect(read(io, 'leads-amdahl-sequence.csv').split('\r\n')[2]).toBe(',Park,jo@example.com,Northwind,Raised a Series B,Ramping at Northwind!,"Better: Hi there, most teams take 4 months.",,email 2 failed')
   })
 
   it('adds send_to with --for, and a halted run says where it stopped', async () => {
@@ -582,7 +601,7 @@ describe('--resume', () => {
     expect(read(io, 'leads-amdahl-sequence.csv').split('\r\n').slice(1).map((l) => l.endsWith(',written'))).toEqual([true, true])
   })
 
-  it('reads the same file with --json, and writes none', async () => {
+  it('with --json updates the file, so a second resume sends nothing', async () => {
     const io = await withKey({ batchResults: failing(['jo@example.com'], 2) })
     const args = ['sequence', file(io, 'emails.md', EMAILS), '--leads', file(io, 'leads.csv', LEADS)]
     await cli(io, ...args)
@@ -594,7 +613,13 @@ describe('--resume', () => {
     expect(r.code).toBe(0)
     expect(r.json.written).toBe(2)
     expect(batches().map((b) => b.map((i) => i.item_id))).toEqual([['row-3']])
-    expect(read(io, 'leads-amdahl-sequence.csv')).toBe(text)
+    expect(r.json.file).toBe(join(io.cwd, 'leads-amdahl-sequence.csv'))
+    expect(read(io, 'leads-amdahl-sequence.csv')).not.toBe(text)
+    expect(read(io, 'leads-amdahl-sequence.csv').split('\r\n').slice(1).map((l) => l.endsWith(',written'))).toEqual([true, true])
+    const sent = batches().length
+    const again = await cli(io, ...args, '--resume', '--json')
+    expect(again.code).toBe(0)
+    expect(batches()).toHaveLength(sent)
   })
 
   it('refuses a results file that is not this list\'s, and says why, before anything is sent', async () => {
@@ -652,5 +677,231 @@ describe('flags', () => {
     const r = await cli(io, 'sequence', file(io, 'emails.md', EMAILS), '--force')
     expect(r.code).toBe(2)
     expect(r.stderr).toBe('Error: --force goes with --csv.\n')
+  })
+})
+
+const posts = () => (server?.log ?? []).filter((r) => r.path === BATCH)
+const TWO = 'Hi.\n---\nBump.'
+const manyPeople = (people: number, note = 'x', extra: string[] = []) => ['Email,Name,Notes', ...Array.from({ length: people }, (_, i) => `p${i}@example.com,Person ${i},${note}`), ...extra].join('\n')
+
+describe('a step too big for one request', () => {
+  const NOTE = 'n'.repeat(1000)
+
+  it('splits each step into requests under the limit, reads them all before the next step, and writes every person', async () => {
+    const io = await withKey()
+    const r = await cli(io, 'sequence', file(io, 'emails.md', TWO), '--leads', file(io, 'leads.csv', manyPeople(500, NOTE)))
+    expect(r.code).toBe(0)
+    const sent = posts()
+    expect(sent.length).toBeGreaterThanOrEqual(4)
+    for (const p of sent) {
+      expect(Buffer.byteLength(p.body)).toBeLessThan(BODY_LIMIT)
+      expect(Buffer.byteLength(p.body)).toBeLessThanOrEqual(900_000)
+      expect((JSON.parse(p.body) as { items: Item[] }).items.length).toBeLessThanOrEqual(500)
+    }
+    const stepOf = (body: string) => ((JSON.parse(body) as { items: Item[] }).items[0]?.context?.prior_touches ? 2 : 1)
+    expect(sent.map((p) => stepOf(p.body))).toEqual([1, 1, 2, 2])
+    const firstOfStepTwo = (server?.log ?? []).findIndex((x) => x.path === BATCH && stepOf(x.body) === 2)
+    const readBefore = new Set((server?.log ?? []).slice(0, firstOfStepTwo).filter((x) => x.method === 'GET' && x.path.startsWith(`${BATCH}es/`)).map((x) => x.path))
+    expect(readBefore.size).toBe(2)
+    const ids = batches().flat().map((i) => i.item_id)
+    expect(new Set(ids).size).toBe(500)
+    const rows = read(io, 'leads-amdahl-sequence.csv').split('\r\n').slice(1)
+    expect(rows).toHaveLength(500)
+    expect(rows.every((l) => l.endsWith(',written'))).toBe(true)
+    expect(r.stderr).toBe('Email 1 of 2: 500 of 500 people done.\nEmail 2 of 2: 500 of 500 people done.\nWrote 2 emails for 500 of 500 people.\n')
+  })
+
+  it('splits the same way on --resume', async () => {
+    const io = await withKey({ batchRefuse: { 3: { status: 402, code: 'quota_exceeded', message: 'The monthly limit is reached.' } } })
+    const args = ['sequence', file(io, 'emails.md', TWO), '--leads', file(io, 'leads.csv', manyPeople(500, NOTE))]
+    const first = await cli(io, ...args)
+    expect(first.code).not.toBe(0)
+    expect(read(io, 'leads-amdahl-sequence.csv').split('\r\n').slice(1).every((l) => l.endsWith(',not written yet'))).toBe(true)
+    await server?.close()
+    server = await startMockServer({ batchPolls: 0, batchResults: (item) => answer(item as Item) })
+    io.env.AMDAHL_API_URL = server.url
+    const again = await cli(io, ...args, '--resume')
+    expect(again.code).toBe(0)
+    expect(posts()).toHaveLength(2)
+    for (const p of posts()) expect(Buffer.byteLength(p.body)).toBeLessThanOrEqual(900_000)
+    expect(read(io, 'leads-amdahl-sequence.csv').split('\r\n').slice(1).every((l) => l.endsWith(',written'))).toBe(true)
+  })
+
+  it('fails the one person whose item alone is over the limit, without sending it, and writes the others', async () => {
+    const io = await withKey()
+    oversize.row = 'row-3'
+    const list = ['Email,Name,Notes', 'a@example.com,Ann,short', 'b@example.com,Bo,short', 'c@example.com,Cy,short'].join('\n')
+    const r = await cli(io, 'sequence', file(io, 'emails.md', TWO), '--leads', file(io, 'leads.csv', list))
+    expect(r.code).toBe(1)
+    expect(batches().flat().map((i) => i.item_id)).toEqual(['row-2', 'row-4', 'row-2', 'row-4'])
+    expect(posts().every((p) => Buffer.byteLength(p.body) < BODY_LIMIT)).toBe(true)
+    expect(r.stderr).toContain('Wrote 2 emails for 2 of 3 people. 1 stopped: 1 at email 1 (its row and earlier emails are too large to send).')
+    const rows = read(io, 'leads-amdahl-sequence.csv').split('\r\n')
+    expect(rows[2]?.endsWith(',,,email 1 failed')).toBe(true)
+  })
+})
+
+describe('a run that stops partway', () => {
+  it('prints the results path before the first batch, and has the file with email 1 written when email 2 is refused', async () => {
+    const io = await withKey()
+    const seen: { stdout: string; file: string | null }[] = []
+    await server?.close()
+    server = await startMockServer({
+      batchPolls: 0,
+      batchResults: (item) => answer(item as Item),
+      batchRefuse: { 2: { status: 402, code: 'quota_exceeded', message: 'The monthly limit is reached.' } },
+      onBatch: () => seen.push({ stdout: io.out.join(''), file: existsSync(join(io.cwd, 'leads-amdahl-sequence.csv')) ? read(io, 'leads-amdahl-sequence.csv') : null }),
+    })
+    io.env.AMDAHL_API_URL = server.url
+    const r = await cli(io, 'sequence', file(io, 'emails.md', EMAILS), '--leads', file(io, 'leads.csv', LEADS))
+    expect(r.code).not.toBe(0)
+    const out = join(io.cwd, 'leads-amdahl-sequence.csv')
+    expect(seen).toHaveLength(2)
+    expect(seen[0]?.stdout).toBe(`Results: ${out}\n`)
+    expect(seen[0]?.file?.split('\r\n')[1]).toBe('Sam,Lee,sam@example.com,Acme,Posted about onboarding,,,,not written yet')
+    expect(seen[1]?.file?.split('\r\n')[1]).toBe('Sam,Lee,sam@example.com,Acme,Posted about onboarding,Ramping at Acme!,"Better: Hi Sam, most teams take 4 months.",,not written yet')
+    expect(r.stdout).toBe(`Results: ${out}\n`)
+  })
+
+  it('never leaves a temp file behind', async () => {
+    const io = await withKey()
+    await cli(io, 'sequence', file(io, 'emails.md', EMAILS), '--leads', file(io, 'leads.csv', LEADS))
+    expect(readdirSync(io.cwd).filter((f) => f.endsWith('.tmp'))).toEqual([])
+  })
+
+  it('says in the help and the README that Ctrl+C does not stop a batch already sent, and that --resume picks up from the file', async () => {
+    const io = await withKey()
+    const help = (await cli(io, 'sequence', '--help')).stdout.replace(/\s+/g, ' ')
+    expect(help).toContain('Ctrl+C stops this command, not a batch already sent')
+    expect(help).toContain('--resume picks up from the results file')
+    const readme = readFileSync(join(__dirname, '..', 'README.md'), 'utf8').replace(/\s+/g, ' ')
+    expect(readme).toContain('Ctrl+C stops the CLI, not a batch already sent')
+  })
+})
+
+describe('a refused batch', () => {
+  it('on quota_exceeded says how many runs are left and does not offer --resume', async () => {
+    const io = await withKey({ batchRefuse: { 2: { status: 429, code: 'quota_exceeded', message: 'The monthly limit is reached.', details: { remaining: 3 } } } })
+    const r = await cli(io, 'sequence', file(io, 'emails.md', EMAILS), '--leads', file(io, 'leads.csv', LEADS))
+    expect(r.code).not.toBe(0)
+    expect(r.stderr).toContain('Email 2 was refused: The monthly limit is reached. 3 runs are left.')
+    expect(r.stderr).not.toContain('--resume')
+    expect(r.stderr).not.toContain('To write the rest')
+  })
+
+  it.each([
+    ['retry_after_seconds in the body', { details: { retry_after_seconds: 12 } }, 12_000],
+    ['the Retry-After header', { retryAfter: 7 }, 7_000],
+    ['no number', {}, 10_000],
+    ['a number past the cap', { details: { retry_after_seconds: 300 } }, 60_000],
+  ])('on rate_limited with %s waits, then sends that batch once more', async (_label, extra, ms) => {
+    const io = await withKey({ batchRefuse: { 1: { status: 429, code: 'rate_limited', message: 'Too many batches.', ...extra } } })
+    const slept: number[] = []
+    io.sleep = async (n: number) => void slept.push(n)
+    const r = await cli(io, 'sequence', file(io, 'emails.md', EMAILS), '--leads', file(io, 'leads.csv', LEADS))
+    expect(r.code).toBe(0)
+    expect(slept).toEqual([ms])
+    expect(posts()).toHaveLength(3)
+    expect(r.stderr).toBe('Email 1 of 2: 2 of 2 people done.\nEmail 2 of 2: 2 of 2 people done.\nWrote 2 emails for 2 of 2 people.\n')
+  })
+
+  it('on a second rate_limited refusal halts as before', async () => {
+    const refuse = { status: 429, code: 'rate_limited', message: 'Too many batches.', details: { retry_after_seconds: 5 } }
+    const io = await withKey({ batchRefuse: { 1: refuse, 2: refuse } })
+    const r = await cli(io, 'sequence', file(io, 'emails.md', EMAILS), '--leads', file(io, 'leads.csv', LEADS))
+    expect(r.code).not.toBe(0)
+    expect(posts()).toHaveLength(2)
+    expect(r.stderr).toContain('Email 1 was refused: Too many batches.')
+    expect(r.stderr).toContain('--resume')
+  })
+
+  it('resends a batch that got no answer with the SAME key, and the server replays the first', async () => {
+    const io = await withKey({ batchDrop: [1] })
+    const r = await cli(io, 'sequence', file(io, 'emails.md', EMAILS), '--leads', file(io, 'leads.csv', LEADS))
+    expect(r.code).toBe(0)
+    const keys = posts().map((p) => (JSON.parse(p.body) as { idempotency_key: string }).idempotency_key)
+    expect(keys).toHaveLength(3)
+    expect(keys[1]).toBe(keys[0])
+    expect(keys[2]).not.toBe(keys[0])
+    expect(read(io, 'leads-amdahl-sequence.csv').split('\r\n').slice(1).every((l) => l.endsWith(',written'))).toBe(true)
+  })
+
+  it('keeps the error\'s hint when three reads in a row are lost', async () => {
+    const io = await withKey({ batchReadRefuse: { status: 401, code: 'unauthenticated', message: 'No.' } })
+    const r = await cli(io, 'sequence', file(io, 'emails.md', EMAILS), '--leads', file(io, 'leads.csv', LEADS))
+    expect(r.code).not.toBe(0)
+    expect(r.stderr).toContain('The batch is still running, and its emails are not in the results.')
+    expect(r.stderr).toContain('Run `amdahl login`, or check AMDAHL_KEY.')
+  })
+})
+
+describe('what is said about the list', () => {
+  it('puts what was left out in --json, and lists every key in --help', async () => {
+    const io = await withKey()
+    const list = manyPeople(500, 'x', ['p500@example.com,Over,x', 'p501@example.com,Over,x', ',,']).replace('p1@example.com', 'P0@example.com')
+    const r = await cli(io, 'sequence', file(io, 'emails.md', TWO), '--leads', file(io, 'leads.csv', list), '--json')
+    expect(r.code).toBe(0)
+    expect(r.json.left_out).toEqual({ over_cap: 2, empty_rows: 1 })
+    expect(r.json.duplicates).toBe(2)
+    expect(r.json.file).toBe(join(io.cwd, 'leads-amdahl-sequence.csv'))
+    const help = (await cli(io, 'sequence', '--help')).stdout.replace(/\s+/g, ' ')
+    for (const key of ['.file', '.left_out', '.duplicates', '.halted', '.send_to']) expect(help).toContain(key)
+  })
+
+  it('counts rows that share an email before the start question, and still writes them', async () => {
+    const io = await atTerminal()
+    io.answers = ['']
+    const list = ['Email,Name', 'sam@example.com,Sam', 'SAM@example.com ,Sam again', 'jo@example.com,Jo'].join('\n')
+    const r = await cli(io, 'sequence', file(io, 'emails.md', TWO), '--leads', file(io, 'leads.csv', list))
+    expect(r.code).toBe(0)
+    expect(r.stderr.startsWith('2 rows share an email with another row.\n')).toBe(true)
+    expect(batches()[0]).toHaveLength(3)
+  })
+
+  it('refuses a --for problem or an existing results file before asking about any field', async () => {
+    const io = await atTerminal()
+    const emails = file(io, 'emails.md', 'Hi {{first_name}} at {{company}}.\n---\nBump {{first_name}}.')
+    const leads = file(io, 'leads.csv', 'Email,Name\nsam@example.com,Sam')
+    const a = await cli(io, 'sequence', emails, '--leads', leads, '--for', 'heyreach')
+    expect(a.code).toBe(2)
+    expect(a.stderr).toContain('HeyReach takes LinkedIn lists only')
+    writeFileSync(join(io.cwd, 'leads-amdahl-sequence.csv'), 'old')
+    const b = await cli(io, 'sequence', emails, '--leads', leads)
+    expect(b.code).toBe(2)
+    expect(b.stderr).toContain('leads-amdahl-sequence.csv already exists.')
+    const c = await cli(io, 'sequence', emails, '--leads', leads, '--for', 'instantly')
+    expect(c.code).toBe(2)
+    expect(io.prompts).toEqual([])
+    expect(batches()).toEqual([])
+  })
+
+  it('keeps no run in the history file: 1,500 writes of it are not made', async () => {
+    const io = await withKey()
+    const r = await cli(io, 'sequence', file(io, 'emails.md', EMAILS), '--leads', file(io, 'leads.csv', LEADS))
+    expect(r.code).toBe(0)
+    expect(existsSync(join(io.homedir, 'config', 'amdahl', 'runs.json'))).toBe(false)
+  })
+})
+
+describe('progress', () => {
+  it('at a terminal, shows the queue position and the estimate the server sent', async () => {
+    const io = await atTerminal({ batchPolls: 2 })
+    io.answers = ['']
+    const r = await cli(io, 'sequence', file(io, 'emails.md', 'Hi.\n---\nBump.'), '--leads', file(io, 'leads.csv', LEADS))
+    expect(r.code).toBe(0)
+    expect(r.stderr).toContain('Email 1 of 2: 0 of 2 people done, queued behind 3 items, about 5 min left.')
+  })
+
+  it('off a terminal, prints a line about once a minute while a step runs, not only at its end', async () => {
+    const io = await withKey({ batchFinishPerRead: 1 })
+    let t = 0
+    io.now = () => (t += 30_000)
+    const list = ['Email,Name', 'a@example.com,A', 'b@example.com,B', 'c@example.com,C', 'd@example.com,D'].join('\n')
+    const r = await cli(io, 'sequence', file(io, 'emails.md', 'Hi.\n---\nBump.'), '--leads', file(io, 'leads.csv', list))
+    expect(r.code).toBe(0)
+    const lines = r.stderr.split('\n').filter((l) => l.startsWith('Email 1 of 2'))
+    expect(lines.length).toBeGreaterThanOrEqual(2)
+    expect(lines.length).toBeLessThan(5)
+    expect(lines.at(-1)).toBe('Email 1 of 2: 4 of 4 people done.')
   })
 })
