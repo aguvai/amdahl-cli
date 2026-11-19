@@ -1145,7 +1145,7 @@ describe('0.5.0: cold QA findings and the empty-search reason', () => {
     }
     for (const emailOnly of ['instantly', 'gmail']) expect((await cli(flags, ...args(emailOnly, 'linkedin_inmail'))).code).toBe(2)
     // Smartlead and Woodpecker run LinkedIn steps too.
-    for (const both of ['smartlead', 'woodpecker']) expect((await cli(flags, ...args(both, 'linkedin_message'))).code).toBe(0)
+    for (const both of ['smartlead', 'woodpecker', 'amplemarket']) expect((await cli(flags, ...args(both, 'linkedin_message'))).code).toBe(0)
     expect((await cli(flags, ...args('linkedin_manual', 'email'))).code).toBe(2)
     expect((await cli(flags, ...args('heyreach', 'linkedin'))).code).toBe(0)
   })

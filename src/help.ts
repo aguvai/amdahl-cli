@@ -96,8 +96,8 @@ reads standard input. With no file, at a terminal, paste the message.
                                drafts-lemlist.csv), then print how to import it.
                                Tools: instantly, smartlead, lemlist, heyreach,
                                reply_io, apollo, outreach, salesloft, hubspot,
-                               lgm, woodpecker, or other (any tool that imports
-                               a CSV).
+                               lgm, woodpecker, amplemarket, or other (any tool
+                               that imports a CSV).
   --force                      Replace a results file that already exists.
 
 In the results CSV, a cell that starts with =, +, - or @ gets a ' in front, so

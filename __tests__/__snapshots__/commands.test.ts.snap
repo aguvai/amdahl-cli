@@ -63,9 +63,9 @@ Commands:
                        as a CSV that tool imports (<list>-<tool>.csv), and say
                        how to import it. Tools: instantly, smartlead, lemlist,
                        heyreach, reply_io, apollo, outreach, salesloft,
-                       hubspot, lgm, woodpecker, other (any tool that imports
-                       a CSV). lemlist, reply_io and other take both channels,
-                       so add --channel email|linkedin.
+                       hubspot, lgm, woodpecker, amplemarket, other (any tool
+                       that imports a CSV). lemlist, reply_io and other take
+                       both channels, so add --channel email|linkedin.
   grade <file|-> [--channel email|linkedin] [--evidence off|workspace]
            [--context <file.json>]
            Grade a draft and write nothing. The score always comes with its
@@ -113,8 +113,8 @@ Commands:
            both (a recipient is --recipient or --recipient-key-hash, not both).
            --provider: lemlist, instantly, outreach, salesloft, hubspot,
                        salesforce, gmail, heyreach, apollo, smartlead,
-                       reply_io, lgm, woodpecker, linkedin_manual, other
-                       (any sender not listed)
+                       reply_io, lgm, woodpecker, amplemarket,
+                       linkedin_manual, other (any sender not listed)
            --channel:  email, linkedin (= linkedin_message), linkedin_invite,
                        linkedin_message, linkedin_inmail
            --sent-as edited needs --sent-text.

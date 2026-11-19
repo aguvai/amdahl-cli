@@ -8,7 +8,8 @@
 // apps/universal-ui/lib/optimizer/send-to/presets.ts and build.ts (and, for the
 // draft column, leads.ts and parse-drafts.ts): the #2180 versions (commit
 // 2a47d5612) with the changes of #2188 at commit 8c1a85c04 (raw values, the
-// columns Amdahl reads left out, the HeyReach guide and left-out wording).
+// columns Amdahl reads left out, the HeyReach guide and left-out wording) and
+// the Amplemarket preset of #2253 (commit 76505dc6d).
 // Nothing here runs the console's code. __tests__/send-to.test.ts compares the
 // CLI with values copied from the console's own test (e2e-stub/optimizer-send-to.spec.ts
 // at that commit) and with each tool's header names and variable syntax typed
@@ -29,7 +30,7 @@ import { usageError } from './errors'
 export type Channel = 'email' | 'linkedin'
 
 /** The tool ids the console and the API share; gmail and outlook have no import file. */
-export const SEND_TO_IDS = ['instantly', 'smartlead', 'lemlist', 'heyreach', 'reply_io', 'apollo', 'outreach', 'salesloft', 'hubspot', 'lgm', 'woodpecker', 'other'] as const
+export const SEND_TO_IDS = ['instantly', 'smartlead', 'lemlist', 'heyreach', 'reply_io', 'apollo', 'outreach', 'salesloft', 'hubspot', 'lgm', 'woodpecker', 'amplemarket', 'other'] as const
 export type SendToId = (typeof SEND_TO_IDS)[number]
 
 type IdentityKey = 'first_name' | 'last_name' | 'company' | 'linkedin_url'
@@ -164,6 +165,17 @@ export const SEND_TO_PRESETS: readonly SendToPreset[] = [
     match: () => 'Map email to Email, amdahl_subject to Snippet 1 and amdahl_message to Snippet 2.',
     insert: 'Add them with the {{ }} button in your step',
     variable: (column) => (column === 'amdahl_subject' ? 'Snippet 1' : 'Snippet 2'),
+  },
+  {
+    id: 'amplemarket',
+    label: 'Amplemarket',
+    channels: ['email'],
+    where: 'Upload the CSV to a List, then add the leads in that List to your sequence.',
+    match: () => 'Map email to Email. Keep amdahl_subject and amdahl_message as lead fields with these names.',
+    insert: PASTE,
+    note: "Amplemarket's help pages do not show how a CSV column becomes a lead field, so check one lead before you start the sequence. Each field holds at most 1,024 characters.",
+    maxValue: 1024,
+    variable: braces,
   },
   {
     id: 'other',

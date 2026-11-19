@@ -95,7 +95,7 @@ export function feedbackProblem(input: unknown): string | null {
 // ── messages.report_send: messages/_reportSendSchema.ts, messageOptimizer/sendReports ────────
 
 // The server's send providers (2026-11-13).
-export const SEND_PROVIDERS = ['lemlist', 'instantly', 'outreach', 'salesloft', 'hubspot', 'salesforce', 'gmail', 'heyreach', 'apollo', 'smartlead', 'reply_io', 'lgm', 'woodpecker', 'linkedin_manual', 'other']
+export const SEND_PROVIDERS = ['lemlist', 'instantly', 'outreach', 'salesloft', 'hubspot', 'salesforce', 'gmail', 'heyreach', 'apollo', 'smartlead', 'reply_io', 'lgm', 'woodpecker', 'amplemarket', 'linkedin_manual', 'other']
 export const SEND_CHANNELS = ['email', 'linkedin_invite', 'linkedin_message', 'linkedin_inmail']
 const REPORT_KEYS = ['run_id', 'provider', 'channel', 'sent_as', 'sent_at', 'provider_send_id', 'provider_campaign_id', 'sequence_step', 'provider_variant_id', 'provider_lead_id', 'thread_id', 'recipient', 'recipient_key_hash', 'sent_text']
 const TEXT_LIMITS: Record<string, number> = { provider_send_id: 256, provider_campaign_id: 256, provider_variant_id: 256, provider_lead_id: 256, thread_id: 512, recipient: 512, sent_text: 10_000 }
