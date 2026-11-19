@@ -297,7 +297,8 @@ What you can do:
                                  client it finds, and asks nothing (also:
                                  amdahl setup)
   amdahl optimize draft.md       Rewrite an outbound email or LinkedIn message
-                                 (with no file, at a terminal, paste it)
+                                 and say what changed and why (with no file,
+                                 at a terminal, paste it)
   amdahl optimize --list drafts.csv
                                  Rewrite a whole list in one batch; results go
                                  to drafts.optimized.csv

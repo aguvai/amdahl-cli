@@ -6,7 +6,9 @@
 // unreachable or unconfigured) is not a rewrite: it prints the reason and the
 // command exits 1. Without `--json`, the message goes to stdout and the
 // summary and up to three lines on what Amdahl did go to stderr, then the run
-// id. A message that still fails a hard rule (`incomplete`, `failed_rules`)
+// id. When the result carries `changes`, a "What Amdahl changed" block (see
+// changes.ts) follows the message and replaces the two lines on what Amdahl
+// did that it repeats. A message that still fails a hard rule (`incomplete`, `failed_rules`)
 // has a warning line on stderr just before it, naming the rules. A feedback link to the run's internal page follows only for Amdahl staff
 // who turn it on (`feedbackLink` in the config, or AMDAHL_FEEDBACK_LINK=1).
 //
@@ -23,6 +25,7 @@
 // no request for it and print no line.
 
 import { amdahlCommand } from '../command-name'
+import { changeLines } from '../changes'
 import { feedbackLinkOn } from '../config'
 import { apiClient, resolveCredential, toCliError, str, type Credential, type Ctx } from '../context'
 import { CliError, EXIT, usageError } from '../errors'
@@ -191,7 +194,7 @@ function and(parts: string[]): string {
  * what Amdahl did first and the flags last. Empty when nothing says anything
  * worth reading.
  */
-export function whatAmdahlDid(result: Record<string, unknown>): string[] {
+export function whatAmdahlDid(result: Record<string, unknown>, withChanges = false): string[] {
   // A kept draft is not the version the steps describe.
   const steps = result.unchanged === true ? { did: '', flagged: [] } : readSteps(list(result.steps) ?? [])
   const flagged = [...steps.flagged]
@@ -231,9 +234,9 @@ export function whatAmdahlDid(result: Record<string, unknown>): string[] {
   // In print order, each with its rank: 1 is kept first.
   const lines = [
     { rank: 5, line: checked },
-    { rank: 3, line: removed },
+    { rank: 3, line: withChanges ? '' : removed },
     { rank: 6, line: usedLine },
-    { rank: 7, line: steps.did },
+    { rank: 7, line: withChanges ? '' : steps.did },
     { rank: 4, line: leftOut },
     { rank: 1, line: flagged.length ? `Flagged ${and(flagged)}; check before sending.` : '' },
   ].filter((l) => l.line && l.line !== '.')
@@ -396,7 +399,8 @@ export async function optimizePasted(ctx: Ctx): Promise<number> {
   const incomplete = incompleteLine(result)
   if (incomplete) out.info(incomplete)
   out.result({}, String(result.message ?? ''))
-  const did = whatAmdahlDid(result)
+  const changes = result.unchanged === true ? [] : changeLines(result)
+  const did = [...changes, ...whatAmdahlDid(result, changes.length > 0)]
   const connect = tipsOn(ctx) && (saysNoData(result) || (await noData)) ? [noDataLine()] : []
   out.info([...did, ...feedbackLines(ctx, result), ...sentLines(result.run_id, undefined, canAsk(ctx)), ...connect, nextTimeLine(ctx)].join('\n'))
   return EXIT.ok
@@ -466,7 +470,8 @@ export async function optimize(ctx: Ctx, args: string[]): Promise<number> {
       const incomplete = incompleteLine(result)
       if (incomplete) out.info(incomplete)
       out.result({}, String(result.message ?? ''))
-      const lines = [...whatAmdahlDid(result), ...feedbackLines(ctx, result), ...sentLines(result.run_id, undefined, canAsk(ctx))]
+      const changes = result.unchanged === true ? [] : changeLines(result)
+      const lines = [...changes, ...whatAmdahlDid(result, changes.length > 0), ...feedbackLines(ctx, result), ...sentLines(result.run_id, undefined, canAsk(ctx))]
       if (lines.length) out.info(lines.join('\n'))
     }
   }

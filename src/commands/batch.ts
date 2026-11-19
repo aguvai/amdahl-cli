@@ -28,13 +28,16 @@
 // runs a cell that starts with `=`, `+`, `-` or `@` as a formula, so the CSV
 // results start such a cell with a quote. When any item's result carries
 // `incomplete`, `failed_rules` or `notes`, the CSV results gain those three
-// columns, and a line says how many messages still fail a hard rule. An older
+// columns, and a line says how many messages still fail a hard rule. When any
+// result carries `changes` rows, they gain `amdahl_changes` too: one line per
+// sentence Amdahl cut, added or reworded, with its reason. An older
 // optimizer sends none of them, so its results are as before. Ctrl+C stops
 // the wait, not the batch.
 
 import { existsSync, writeFileSync } from 'node:fs'
 import { basename, dirname, extname, join } from 'node:path'
 import { amdahlCommand } from '../command-name'
+import { changeCell, hasChanges } from '../changes'
 import { apiClient, call, resolveCredential, str, type Credential, type Ctx } from '../context'
 import { CliError, EXIT, usageError } from '../errors'
 import { readTextFile } from '../files'
@@ -343,6 +346,9 @@ export const RESULT_COLUMNS = ['optimized_message', 'status', 'summary', 'run_id
 /** The results columns a CSV list also gains when any result says how its message stands against the hard rules. */
 export const RULE_COLUMNS = ['incomplete', 'failed_rules', 'notes']
 
+/** The results column a CSV list also gains when any result says what Amdahl changed. */
+export const CHANGES_COLUMN = 'amdahl_changes'
+
 /** Whether an item's result carries any of {@link RULE_COLUMNS}. */
 function hasRuleFields(item: Record<string, unknown>): boolean {
   const result = record(item.result)
@@ -354,9 +360,10 @@ function hasRuleFields(item: Record<string, unknown>): boolean {
  * list already has under a name (a CRM export may have `status`) keeps it, and
  * Amdahl's column takes `amdahl_` in front, so nothing is written over.
  */
-export function resultColumnNames(header: string[], withRules = false): string[] {
+export function resultColumnNames(header: string[], withRules = false, withChanges = false): string[] {
   const taken = new Set(header.map((h) => h.trim().toLowerCase()))
-  return (withRules ? [...RESULT_COLUMNS, ...RULE_COLUMNS] : RESULT_COLUMNS).map((name) => {
+  const names = [...RESULT_COLUMNS, ...(withRules ? RULE_COLUMNS : []), ...(withChanges ? [CHANGES_COLUMN] : [])]
+  return names.map((name) => {
     let candidate = name
     while (taken.has(candidate)) candidate = `amdahl_${candidate}`
     taken.add(candidate)
@@ -442,8 +449,13 @@ function writeResults(list: ListFile | null, id: string, items: Record<string, u
   const path = resultsFile(list, id, cwd)
   if (list?.kind === 'csv' && list.header && list.rows) {
     const withRules = items.some(hasRuleFields)
-    const cells = (i: number) => [...resultCells(byIndex.get(i), contexts[i]), ...(withRules ? ruleCells(byIndex.get(i)) : [])]
-    const rows = [[...list.header, ...resultColumnNames(list.header, withRules)], ...list.rows.map((row, i) => [...row, ...cells(i)])]
+    const withChanges = items.some((i) => hasChanges(record(i.result)))
+    const cells = (i: number) => [
+      ...resultCells(byIndex.get(i), contexts[i]),
+      ...(withRules ? ruleCells(byIndex.get(i)) : []),
+      ...(withChanges ? [changeCell(record(byIndex.get(i)?.result))] : []),
+    ]
+    const rows = [[...list.header, ...resultColumnNames(list.header, withRules, withChanges)], ...list.rows.map((row, i) => [...row, ...cells(i)])]
     writeNew(path, toCsv(rows.map((row) => row.map(neutralise))), force, pickUp)
     return path
   }
