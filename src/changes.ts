@@ -62,20 +62,25 @@ function plainTag(value: unknown): string {
 /**
  * The line a new sentence rests on: the first `added_claims` entry whose
  * sentence and `after` contain one another, its first source's text cut at a
- * word, then `(+N more)` when it has other sources. Empty when none matches.
+ * word, then `(+N more)` when it has other sources (`verbose` lists each of
+ * them instead). Empty when none matches.
  */
-function sourceText(result: Record<string, unknown>, after: string): string {
+function sourceTexts(result: Record<string, unknown>, after: string, verbose: boolean): string[] {
   const claim = records(result.added_claims).find((c) => {
     const sentence = field(c.sentence)
     return sentence !== '' && (sentence.includes(after) || after.includes(sentence))
   })
   const sources = records(claim?.sources)
-  const first = sources[0]
-  const text = field(first?.text)
-  if (!first || !text) return ''
-  const tag = plainTag(first.tag)
-  const more = sources.length > 1 ? ` (+${sources.length - 1} more)` : ''
-  return `"${cutAtWord(text, SOURCE_CHARS)}"${tag ? ` (${tag})` : ''}${more}`
+  const quote = (source: Record<string, unknown> | undefined) => {
+    const text = field(source?.text)
+    if (!source || !text) return ''
+    const tag = plainTag(source.tag)
+    return `"${cutAtWord(text, SOURCE_CHARS)}"${tag ? ` (${tag})` : ''}`
+  }
+  const first = quote(sources[0])
+  if (!first) return []
+  if (verbose) return [first, ...sources.slice(1).map(quote).filter(Boolean)]
+  return [`${first}${sources.length > 1 ? ` (+${sources.length - 1} more)` : ''}`]
 }
 
 /** `text` wrapped under a two-space margin, with `mark` in front of the first line and the rest under the text. */
@@ -93,7 +98,10 @@ function note(label: string, text: string, width: number): string[] {
 /** A row's reason lines, as label and text: Cut and New when the server split them, else the one reason. */
 function reasons(row: Change): [string, string][] {
   if (row.before && row.after) {
-    if (row.cut || row.added) return [...(row.cut ? [['Cut', row.cut]] : []), ...(row.added ? [['New', row.added]] : [])] as [string, string][]
+    // A reworded sentence with one reason: the reason is about the old text (Was) or the new (Now), not a cut or an add.
+    if (row.cut && row.added) return [['Cut', row.cut], ['New', row.added]]
+    if (row.cut) return [['Was', row.cut]]
+    if (row.added) return [['Now', row.added]]
     return row.why ? [['Why', row.why]] : []
   }
   if (row.before) return row.cut || row.why ? [['Cut', row.cut || row.why]] : []
@@ -104,7 +112,7 @@ function reasons(row: Change): [string, string][] {
  * Rows as terminal lines under `header`, wrapped to `width`. Empty when there is nothing to show.
  * When every row gives the same one reason, it is said once after the rows, not under each.
  */
-function blockLines(result: Record<string, unknown>, header: string, width: number): string[] {
+function blockLines(result: Record<string, unknown>, header: string, width: number, verbose = false): string[] {
   const shown = rows(result)
   if (shown.length === 0) return []
   const texts = shown.map((row) => reasons(row).map(([, text]) => text))
@@ -114,8 +122,7 @@ function blockLines(result: Record<string, unknown>, header: string, width: numb
     if (row.before) lines.push(...marked('-', `"${row.before}"`, width))
     if (row.after) lines.push(...marked('+', `"${row.after}"`, width))
     if (!shared) for (const [label, text] of reasons(row)) lines.push(...note(label, text, width))
-    const source = row.after ? sourceText(result, row.after) : ''
-    if (source) lines.push(...note('Source', source, width))
+    for (const source of row.after ? sourceTexts(result, row.after, verbose) : []) lines.push(...note('Source', source, width))
   }
   if (shared) lines.push(...wrap(`Why, for each change: ${shared}`, width, '  '))
   return lines
@@ -125,8 +132,8 @@ function blockLines(result: Record<string, unknown>, header: string, width: numb
  * The "What Amdahl changed" block for an optimize result, as lines for stderr.
  * Empty when `changes` is absent, empty or has no usable row.
  */
-export function changeLines(result: Record<string, unknown>, width = COLUMNS): string[] {
-  return blockLines(result, CHANGES_HEADER, width)
+export function changeLines(result: Record<string, unknown>, width = COLUMNS, verbose = false): string[] {
+  return blockLines(result, CHANGES_HEADER, width, verbose)
 }
 
 /**

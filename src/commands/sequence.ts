@@ -205,7 +205,7 @@ export async function sequence(ctx: Ctx, args: string[]): Promise<number> {
   if (bare && !(atTerminal(ctx) && !out.json)) throw usageError('Give a file of emails, or a goal to write them from.', USAGE)
 
   const request = requestBase(ctx)
-  let credential: Credential | null = bare ? await credentialOrSignIn(ctx) : null
+  let credential: Credential | null = bare ? await credentialOrSignIn(ctx, 'paste your emails') : null
   let emails: SeqEmail[]
   let plan: Job['plan'] = null
   if (bare) {

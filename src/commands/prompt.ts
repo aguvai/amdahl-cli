@@ -29,6 +29,7 @@ import { rememberRun } from '../history'
 import { askGuided, nextTimeLine, type GuidedAnswers } from '../prompt-guided'
 import { isCsvPath, recipientsFromCsv } from '../prompt-recipients'
 import { clip, field, paragraphs, record, records, wrap } from '../text'
+import { atTerminal } from '../terminal'
 import { askingAllowed } from './feedback'
 import { CHANNELS, credentialOrSignIn, oneOf, readContext } from './optimize'
 
@@ -219,17 +220,23 @@ export function recipientsNeeded(err: unknown, sentRecipients: boolean): unknown
 }
 
 /** The recipients file: a CSV, or JSON of 1 to 6 objects with a `recipient`, as the API takes them. */
-function readRecipients(path: string, mode: string): unknown[] {
+function readRecipients(ctx: Ctx, path: string, mode: string): unknown[] {
   const text = readTextFile(path)
   const csv = isCsvPath(path)
-  let parsed: unknown
+  let value: unknown
   try {
-    parsed = csv ? recipientsFromCsv(path, text) : JSON.parse(text)
+    value = csv ? recipientsFromCsv(path, text) : JSON.parse(text)
   } catch (err) {
     if (err instanceof CliError) throw err
     throw usageError(`--recipients ${path} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`)
   }
-  if (!Array.isArray(parsed)) throw usageError('--recipients must be a JSON array of {"recipient": {...}} objects.', 'Each recipient may have name, company, email, domain, linkedin_url and attributes; also recipient_notes and label.')
+  if (!Array.isArray(value)) throw usageError('--recipients must be a JSON array of {"recipient": {...}} objects.', 'Each recipient may have name, company, email, domain, linkedin_url and attributes; also recipient_notes and label.')
+  let parsed: unknown[] = value
+  // A person at a terminal is told which ones are used; a script is refused, so it never runs on a cut list unseen.
+  if (parsed.length > RECIPIENTS.max && atTerminal(ctx)) {
+    ctx.out.info(`Using the first ${RECIPIENTS.max} of ${parsed.length}.`)
+    parsed = parsed.slice(0, RECIPIENTS.max)
+  }
   if (parsed.length < RECIPIENTS.min || parsed.length > RECIPIENTS.max) throw usageError(`--recipients needs ${RECIPIENTS.min} to ${RECIPIENTS.max} recipients, not ${parsed.length}.`)
   if (mode === 'improve' && parsed.length < RECIPIENTS.minForImprove) {
     throw usageError('Improving a prompt needs at least 2 recipients: the first half train it, the rest are held out.', 'Add one, or grade the prompt with --mode grade.')
@@ -325,7 +332,7 @@ export async function prompt(ctx: Ctx, args: string[]): Promise<number> {
   const contextPath = str(flags.context)
   if (contextPath) body.context = readContext(contextPath)
   const recipientsPath = str(flags.recipients)
-  if (recipientsPath) body.recipients = readRecipients(recipientsPath, mode)
+  if (recipientsPath) body.recipients = readRecipients(ctx, recipientsPath, mode)
 
   let file = args[0]
   let text: string
@@ -334,7 +341,7 @@ export async function prompt(ctx: Ctx, args: string[]): Promise<number> {
   const skip = { recipients: !!recipientsPath, mode: str(flags.mode) || undefined }
   if (file === undefined) {
     if (askingAllowed(ctx)) {
-      credential = await credentialOrSignIn(ctx)
+      credential = await credentialOrSignIn(ctx, 'paste your prompt')
       const answers = await askGuided(ctx, skip)
       if (!answers) return EXIT.ok
       guided = answers

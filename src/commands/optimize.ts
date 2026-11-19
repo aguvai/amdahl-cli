@@ -79,14 +79,20 @@ export function readContext(path: string): Record<string, unknown> {
   return parsed as Record<string, unknown>
 }
 
-/** Reject after `ms`; the request itself is abandoned. */
-function withTimeout<T>(promise: Promise<T>, ms: number, file: string): Promise<T> {
+/** The request timeout: {@link OPTIMIZE_TIMEOUT_MS}, or AMDAHL_OPTIMIZE_TIMEOUT_MS (for tests). */
+function timeoutMs(ctx: Ctx): number {
+  const n = Number(ctx.io.env.AMDAHL_OPTIMIZE_TIMEOUT_MS)
+  return Number.isFinite(n) && n > 0 ? n : OPTIMIZE_TIMEOUT_MS
+}
+
+/** Reject after `ms`, and abort the request through `controller`, so it does not run on after the timeout. */
+function withTimeout<T>(promise: Promise<T>, ms: number, file: string, controller: AbortController): Promise<T> {
   let timer: NodeJS.Timeout | undefined
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new CliError('timeout', `Optimizing ${file} timed out after ${ms / 1000} s.`, EXIT.network)),
-      ms
-    )
+    timer = setTimeout(() => {
+      reject(new CliError('timeout', `Optimizing ${file} timed out after ${ms / 1000} s.`, EXIT.network))
+      controller.abort()
+    }, ms)
   })
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
 }
@@ -337,14 +343,17 @@ export function requestOptions(ctx: Ctx): Record<string, unknown> {
 
 /** One optimize request, with the timeout, any failure as a CliError. */
 export async function optimizeOne(ctx: Ctx, credential: Credential, message: string, base: Record<string, unknown>, file: string): Promise<Record<string, unknown>> {
+  const controller = new AbortController()
   try {
     return await withTimeout(
       apiClient(ctx, credential).request<Record<string, unknown>>('/api/platform/v1/messages/optimize', {
         method: 'POST',
         body: { message, ...base },
+        signal: controller.signal,
       }),
-      OPTIMIZE_TIMEOUT_MS,
-      file
+      timeoutMs(ctx),
+      file,
+      controller
     )
   } catch (err) {
     throw toCliError(err)
@@ -354,15 +363,15 @@ export async function optimizeOne(ctx: Ctx, credential: Credential, message: str
 /**
  * The credential for a pasted run. With no sign-in (or an expired one), signs
  * in through the browser first, so nobody pastes a draft only to hear they
- * are not signed in.
+ * are not signed in. `then` is what the command asks for next, in its own words.
  */
-export async function credentialOrSignIn(ctx: Ctx): Promise<Credential> {
+export async function credentialOrSignIn(ctx: Ctx, then = 'paste your message'): Promise<Credential> {
   try {
     return await resolveCredential(ctx)
   } catch (err) {
     if (!(err instanceof CliError && err.exit === EXIT.unauthenticated)) throw err
   }
-  ctx.out.info(`Sign in first, then paste your message.\n${NEW_USER}`)
+  ctx.out.info(`Sign in first, then ${then}.\n${NEW_USER}`)
   const signedIn = await browserSignIn(ctx)
   ctx.out.info(`✓ Signed in · ${printable(signedIn.workspace.name)}`)
   return resolveCredential(ctx)
@@ -401,7 +410,7 @@ export async function optimizePasted(ctx: Ctx): Promise<number> {
   const incomplete = incompleteLine(result)
   if (incomplete) out.info(incomplete)
   out.result({}, String(result.message ?? ''))
-  const changes = result.unchanged === true ? [] : changeLines(result)
+  const changes = result.unchanged === true ? [] : changeLines(result, ctx.io.columns() ?? undefined, ctx.flags.verbose === true)
   const did = [...changes, ...whatAmdahlDid(result, changes.length > 0)]
   const connect = tipsOn(ctx) && (saysNoData(result) || (await noData)) ? [noDataLine()] : []
   out.info([...did, ...feedbackLines(ctx, result), ...sentLines(result.run_id, undefined, canAsk(ctx)), ...connect, nextTimeLine(ctx)].join('\n'))
@@ -473,7 +482,7 @@ export async function optimize(ctx: Ctx, args: string[]): Promise<number> {
       const incomplete = incompleteLine(result)
       if (incomplete) out.info(incomplete)
       out.result({}, String(result.message ?? ''))
-      const changes = result.unchanged === true ? [] : changeLines(result)
+      const changes = result.unchanged === true ? [] : changeLines(result, ctx.io.columns() ?? undefined, ctx.flags.verbose === true)
       const lines = [...changes, ...whatAmdahlDid(result, changes.length > 0), ...feedbackLines(ctx, result), ...sentLines(result.run_id, undefined, canAsk(ctx))]
       if (lines.length) out.info(lines.join('\n'))
       if (inputs.length === 1) await askRating(ctx, credential, { id: text(result.run_id), surface: 'optimize' })
