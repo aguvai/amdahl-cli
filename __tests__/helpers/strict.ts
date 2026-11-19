@@ -252,6 +252,8 @@ export function promptProblems(input: unknown): string[] {
         const at = `$.recipients[${i}]`
         if (!isObject(item)) return void errors.push(`${at}: Expected object`)
         errors.push(...unknownKeys(at, item, RECIPIENT_ITEM_KEYS))
+        // messages/_promptRecipients.ts: label is trimmed, 1 to MAX_LABEL_CHARS (200).
+        if (item.label !== undefined && (typeof item.label !== 'string' || !item.label.trim() || item.label.trim().length > 200)) errors.push(`${at}.label: String must contain 1 to 200 character(s)`)
         if (!isObject(item.recipient) || Object.keys(item.recipient).length === 0) errors.push(`${at}.recipient: name a person or a company`)
       })
     }

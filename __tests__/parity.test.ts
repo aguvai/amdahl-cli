@@ -295,7 +295,7 @@ describe('prompt', () => {
     io.stdinText = PROMPT
     expect((await cli(io, 'prompt', '-', '--no-wait')).code).toBe(0)
     expect(sentBody('/api/platform/v1/messages/optimize_prompt').prompt).toBe(PROMPT)
-    io.answers = [PROMPT + ' Paste']
+    io.answers = ['', PROMPT + ' Paste', '', '']
     expect((await cli(io, 'prompt', '--no-wait')).code).toBe(0)
     expect(sentBody('/api/platform/v1/messages/optimize_prompt').prompt).toBe(PROMPT + ' Paste')
   })

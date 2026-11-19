@@ -172,14 +172,22 @@ predict replies. With --json it prints {"ok", "file", "result"}: the grade is
 ${GLOBAL}`,
 
   prompt: `Usage: amdahl prompt <file|-> [--mode improve|grade]
-                     [--recipients <file.json>] [--channel email|linkedin]
-                     [--context <file.json>] [--no-wait]
+                     [--recipients <file.json|file.csv>]
+                     [--channel email|linkedin] [--context <file.json>]
+                     [--no-wait]
        amdahl prompt --run <id> [--no-wait]
+       amdahl prompt          (at a terminal: three steps, no file needed)
 
 Grade or improve a reusable prompt (the instructions a writer follows to write
 an outbound email to any recipient) by the emails it writes. It starts a run
 that takes a few minutes, prints the run id and waits. One message, not a
 prompt, is for amdahl optimize.
+
+With no file, at a terminal, amdahl prompt walks through three steps: 1 your
+prompt (paste it, or start from an example), 2 who to test it on (up to 6
+companies you type, or none and Amdahl picks from your workspace), 3 Improve
+or Grade. It ends by showing the command that skips the questions next time.
+An agent, CI, a pipe, --json and AMDAHL_NO_PROMPT=1 get no questions.
 
   --mode improve|grade  improve (the default) revises the prompt and returns it
                         only when the revision wrote better email on recipients
@@ -188,8 +196,10 @@ prompt, is for amdahl optimize.
   --recipients <file>   1 to 6 sample recipients as JSON: [{"recipient":
                         {"company": "Helix"}, "recipient_notes": "..."}]. Each
                         may have name, company, email, domain, linkedin_url and
-                        attributes. Improve needs 2 or more. Left out, Amdahl
-                        picks up to 6 of your workspace's accounts.
+                        attributes. Or a .csv with a header row: company
+                        (required), name and notes. Improve needs 2 or more.
+                        Left out, Amdahl picks up to 6 of your workspace's
+                        accounts.
   --channel email|linkedin  What the emails are.
   --context <file.json>     Your rules, facts and voice_examples, as JSON.
   --no-wait             Start the run, print its id and stop.
