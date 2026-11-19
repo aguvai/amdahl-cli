@@ -202,8 +202,9 @@ export async function sequence(ctx: Ctx, args: string[]): Promise<number> {
   // An agent, CI, a pipe and --json cannot be asked: they get the usage.
   if (bare && !(atTerminal(ctx) && !out.json)) throw usageError('Give a file of emails, or a goal to write them from.', USAGE)
 
-  const target = csvTarget(ctx, file ?? null)
   const saved = from !== null && file !== undefined ? savedBefore(ctx, file, from) : null
+  // --from reads the CSV an earlier run saved, and writes the whole sequence back to it, with or without --csv.
+  const target = csvTarget(ctx, file ?? null) ?? saved?.path ?? null
   if (target) assertFree(ctx, target, flags.force === true, saved !== null)
   const request = requestBase(ctx)
   let credential: Credential | null = bare ? await credentialOrSignIn(ctx, 'paste your emails') : null

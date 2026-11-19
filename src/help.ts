@@ -144,10 +144,10 @@ the next email, and so does a label line: Email, Step, Touch, Message, Day or
 Follow-up with a number, then maybe (...) and a title of up to 5 words, such as
 "Email 2", "Day 3" or "Step 2: Break-up email". A line that ends in . ? or !
 after the colon is text, not a break. At a terminal it lists what it found
-before it sends anything. An email
-may start with a Subject: line. Email 1 keeps its subject. A later email with a
-Subject: line starts a new thread and keeps it. A later email with none is a
-reply in the same thread and goes with no subject:
+before it sends anything. An email may start with a Subject: line. Email 1
+keeps its subject. A later email with a Subject: line starts a new thread and
+keeps it. A later email with none is a reply in the same thread and goes with
+no subject:
 
   Subject: Ramping SDRs at {{company}}
 
@@ -278,7 +278,9 @@ rest are not sent, and it exits 1 (6 when rate limited, after one retry). With
 {"ok", "mode", "emails", "fields"}: each email has .subject, .message,
 .run_id and .result; .fields has .kept and .lost; on a failure .failed has
 .index, .reason and .detail; with --csv, .file and .saved (how many emails it
-holds).
+holds). --write adds .plan (each email's .name and .job). A run that Ctrl+C or a
+closed pipe stopped has .stopped ("interrupted" or "closed"), and a CSV that
+could not be written has .file_error (.code and .detail).
 ${GLOBAL}`,
 
   search: `Usage: amdahl search "<question>" [--research] [--limit <n>]

@@ -190,6 +190,8 @@ export async function runSequence(ctx: Ctx, credential: Credential, job: Job): P
         stopped = 'interrupted'
         break
       }
+      // EPIPE arrives a tick after the write that hit the closed pipe, so let it land before the check.
+      if (io.stdoutClosed) await new Promise((resolve) => setImmediate(resolve))
       if (io.stdoutClosed?.()) {
         stopped = 'closed'
         break

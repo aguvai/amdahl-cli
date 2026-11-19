@@ -160,6 +160,25 @@ describe('S4: Ctrl+C and --from', () => {
     expect(readFileSync(csv, 'utf8')).toContain('3,,Better: Three.')
   })
 
+  it('--from without --csv reads the saved CSV and writes the whole sequence back to it', async () => {
+    const io = await withKey()
+    await server?.close()
+    let fire: (body: Answer, i: number) => Answer = answer
+    server = await startMockServer({ optimizeAnswer: (b, i) => fire(b, i) })
+    io.env.AMDAHL_API_URL = server.url
+    fire = interruptAt(io, 1)
+    const path = put(io, 'x.md', THREE)
+    const csv = join(io.cwd, 'x-amdahl.csv')
+    expect((await cli(io, 'sequence', path, '--csv')).code).toBe(130)
+    fire = answer
+    const again = await cli(io, 'sequence', path, '--from', '2')
+    expect(again.code).toBe(0)
+    const saved = readFileSync(csv, 'utf8')
+    expect(saved).toContain('1,,Better: One.')
+    expect(saved).toContain('3,,Better: Three.')
+    expect(again.stdout).toContain(`Saved: ${csv}`)
+  })
+
   it('--from without the saved file names it', async () => {
     const io = await withKey()
     const r = await cli(io, 'sequence', put(io, 'x.md', THREE), '--from', '2')
@@ -197,6 +216,8 @@ describe('S6: the sign-in comes before the question', () => {
     expect(io.opened).toHaveLength(1)
     expect(r.stderr.indexOf('Signed in')).toBeGreaterThan(-1)
     expect(r.stderr.indexOf('Signed in')).toBeLessThan(r.stderr.indexOf('The plan, 3 emails:'))
+    expect(r.stderr).toContain('Sign in first, then write your sequence.')
+    expect(r.stderr).not.toContain('paste your message')
   })
 })
 
@@ -327,10 +348,11 @@ describe('N6, N7, N8, N10', () => {
 })
 
 describe('EPIPE: a closed pipe', () => {
-  it('stops before the next paid email, with no error', async () => {
+  it('stops before the next paid email, with no error, though EPIPE lands a tick after the write', async () => {
     const io = await withKey()
     let closed = false
-    io.stdout = () => void (closed = true)
+    // Real stdout reports EPIPE on a later tick, not during the write.
+    io.stdout = () => void setImmediate(() => (closed = true))
     io.stdoutClosed = () => closed
     const r = await cli(io, 'sequence', put(io, 'x.md', THREE))
     expect(r.code).toBe(0)

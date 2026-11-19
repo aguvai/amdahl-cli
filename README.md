@@ -860,9 +860,15 @@ follow-up to the improved emails before it, so email 3 knows what 1 and 2 now
 say. Each email is one run (`POST /messages/optimize`), so a sequence of 4 is
 4 runs. A single message is still `amdahl optimize`.
 
-The file is text or markdown, or `-` for standard input. A line of `---`, or a
-heading such as `Email 2` or `Follow-up`, starts the next email. An email may
-start with a `Subject:` line. A later email with none is a reply in the same
+The file is text or markdown, or `-` for standard input. A line of `---` starts
+the next email, and so does a short label line: `Email`, `Step`, `Touch`,
+`Message`, `Day` or `Follow-up`, with a number, then maybe a note in brackets
+and a title of up to 5 words that does not end in `.`, `?` or `!`. So
+`Email 2`, `Day 3`, `Email 1 - Intro` and `Step 2: Break-up email` start an
+email, and a body line such as `Step 1: connect your TMS.` stays where it is.
+With fewer than 2 emails it says how many it found and to put `---` between
+them. At a terminal it lists the emails it found before it sends anything. An
+email may start with a `Subject:` line. A later email with none is a reply in the same
 thread and goes with no subject:
 
 ```
@@ -913,6 +919,19 @@ Saved emails 1 to 8 only: emails-amdahl.csv
 
 With none back, it says `Nothing was saved to emails-amdahl.csv.`
 
+Ctrl+C stops the run. The emails that came back are saved (with `--csv`, or at
+a terminal), each one's run id is printed, and it exits 130. `--from <n>` picks
+up at email n: it reads emails 1 to n-1 from the saved CSV (`--csv <file.csv>`,
+or `<name>-amdahl.csv` next to the file), sends them as the earlier emails, and
+writes the whole sequence back to that file:
+
+```sh
+amdahl sequence emails.md --from 3
+```
+
+At a terminal, a finished run with no `--csv` asks `Save as emails-amdahl.csv?`.
+A closed pipe (`| head`) stops the run before the next email is sent.
+
 An email that is refused as rate limited is tried once more. Amdahl waits as
 long as the server asks (`retry_after_seconds` or the `Retry-After` header, at
 most 60 seconds, and 10 with no number) and, at a terminal, says so:
@@ -928,7 +947,10 @@ With `--json` it prints one document: `ok`, `mode` (`improve` or `write`),
 `emails` (each with `index`, `subject`, `message`, `run_id` and `result`),
 `fields` (`kept` and `lost`), `failed` (`index`, `reason` and `detail`, only
 when the run stopped), and, when a file was written, `file` and `saved` (how
-many emails it holds).
+many emails it holds). `--write` adds `plan` (each email's `name` and `job`). A
+run that Ctrl+C or a closed pipe stopped has `stopped` (`interrupted` or
+`closed`), and a CSV that could not be written has `file_error` (`code` and
+`detail`).
 
 Both modes (improve and `--write`) also take `--leads <list.csv>`, to write one
 sequence for each person in a lead list. That is the next part. `--resume`,
