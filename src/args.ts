@@ -63,6 +63,13 @@ export const COMMAND_OPTIONS: Record<string, OptionSpec> = {
     evidence: { type: 'string' },
     'on-unsupported': { type: 'string' },
     context: { type: 'string' },
+    leads: { type: 'string' },
+    match: { type: 'string', multiple: true },
+    fallback: { type: 'string', multiple: true },
+    same: { type: 'string', multiple: true },
+    drop: { type: 'string', multiple: true },
+    for: { type: 'string' },
+    resume: { type: 'boolean' },
   },
   grade: {
     channel: { type: 'string' },
@@ -328,6 +335,8 @@ What you can do:
   amdahl sequence emails.md      Improve a 2 to 10 email sequence, in order
   amdahl sequence --write "<goal>"
                                  Write a new one, 2 to 6 emails
+  amdahl sequence emails.md --leads leads.csv
+                                 A sequence for each person in a lead list
   amdahl grade draft.md          Grade a message: score and the lines behind
   amdahl prompt prompt.md        Grade or improve a reusable prompt by the
                                  emails it writes (with no file, at a
@@ -383,6 +392,14 @@ Commands:
            for stdin), or write 2 to 6 new ones. Each email is written as a
            follow-up to the improved ones before it. --json prints {ok, mode,
            emails, fields}: each email has .subject, .message and .run_id.
+  sequence <file> --leads <list.csv> [--match <field>=<column>]
+           [--fallback <field>=<text>] [--same <field>=<text>] [--drop <field>]
+           [--for <tool>] [--force] [--resume]
+  sequence --write "<goal>" --leads <list.csv> [--emails <2-6>] [--plan <file>]
+           [--for <tool>] [--force] [--resume]
+           A whole sequence for each person in a lead list, up to 500 people.
+           Each person's email 2 follows their own email 1. The results are
+           saved next to the list as <list>-amdahl-sequence.csv.
   grade <file|-> [--channel email|linkedin] [--evidence off|workspace]
            [--context <file.json>]
            Grade a draft and write nothing. The score always comes with its

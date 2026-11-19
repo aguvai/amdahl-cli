@@ -213,7 +213,7 @@ const LEAD_FIELDS: ReadonlyArray<{ key: LeadField; names: readonly string[] }> =
   { key: 'linkedin', names: ['linkedin', 'linkedin_url', 'linkedin_profile', 'person_linkedin_url', 'li_url', 'linkedin_profile_url'] },
 ]
 
-const norm = (h: string) =>
+export const norm = (h: string) =>
   h
     .replace(/^\uFEFF/, '')
     .trim()
@@ -294,6 +294,8 @@ export interface SendToFile {
   ready: number
   leftOut: LeftOut
   overLimit: number
+  /** For each email of a sequence, whether the file has a subject column for it. Email 1 first. */
+  stepSubjects: boolean[]
 }
 
 /** One CSV cell, quoted where it must be. It is never changed: a sequencer imports a value raw, so no `'` guard. */
@@ -315,7 +317,7 @@ const isDraftHeader = (h: string) => ['message', 'draft', 'email_copy'].includes
  * or channel column or one that holds only addresses. The console finds it the
  * same way, and leaves it out of the import file.
  */
-function draftColumn(headers: string[], rows: string[][]): number {
+export function draftColumn(headers: string[], rows: string[][]): number {
   const n = headers.map(norm)
   const subjectCol = n.findIndex((h) => SUBJECT_HEADERS.includes(h))
   const channelCol = n.findIndex((h) => CHANNEL_HEADERS.includes(h))
@@ -364,9 +366,12 @@ function hasContact(lead: Lead, map: LeadMap, channel: Channel, preset: SendToPr
   return Boolean(first && last)
 }
 
+/** One email of a person's sequence as written, or null when it was not. */
+export type StepEmail = { subject: string; body: string } | null
+
 interface Column {
   name: string
-  value: (written: Extract<Written, { kind: 'written' }>, lead: Lead) => string
+  value: (written: Extract<Written, { kind: 'written' }>, lead: Lead, steps?: StepEmail[]) => string
 }
 
 function identityColumns(map: LeadMap, preset: SendToPreset): { columns: Column[]; used: Set<number> } {
@@ -414,7 +419,7 @@ export interface SendToInput {
   /** The list's header row, as read (a BOM already gone). */
   headers: string[]
   /** One entry per list row, in order: its cells, and what Amdahl wrote for it. */
-  rows: { cells: string[]; written: Written }[]
+  rows: { cells: string[]; written: Written; steps?: StepEmail[] }[]
   channel: Channel
   preset: SendToPreset
 }
@@ -424,7 +429,7 @@ export function buildSendToFile({ path, headers: raw, rows, channel, preset }: S
   const headers = raw.map((h) => h.replace(/^\uFEFF/, '').trim())
   const map = autoMap(headers)
   const leftOut: LeftOut = { failed: 0, unwritten: 0, needsInput: 0, noContact: 0 }
-  const ready: Array<{ written: Extract<Written, { kind: 'written' }>; lead: Lead }> = []
+  const ready: Array<{ written: Extract<Written, { kind: 'written' }>; lead: Lead; steps?: StepEmail[] }> = []
   for (const row of rows) {
     const lead = leadOf(row.cells, map)
     const written = row.written
@@ -432,25 +437,44 @@ export function buildSendToFile({ path, headers: raw, rows, channel, preset }: S
     else if (written.kind === 'unwritten') leftOut.unwritten += 1
     else if (written.kind === 'needs_input') leftOut.needsInput += 1
     else if (!hasContact(lead, map, channel, preset)) leftOut.noContact += 1
-    else ready.push({ written, lead })
+    else ready.push({ written, lead, steps: row.steps })
   }
   const identity = identityColumns(map, preset)
-  const taken = new Set<string>([...identity.columns.map((c) => c.name), subjectColumn, messageColumn])
+  const later = laterSteps(ready.map((r) => r.steps), channel)
+  const taken = new Set<string>([...identity.columns.map((c) => c.name), subjectColumn, messageColumn, ...later.map((c) => c.name)])
   const columns: Column[] = [
     ...identity.columns,
     ...(channel === 'email' ? [{ name: subjectColumn, value: (w: Extract<Written, { kind: 'written' }>) => w.subject }] : []),
     { name: messageColumn, value: (w: Extract<Written, { kind: 'written' }>) => w.body },
+    ...later,
     ...otherColumns(headers, identity.used, taken, draftColumn(headers, rows.map((r) => r.cells))),
   ]
-  const lines = ready.map(({ written, lead }) => columns.map((c) => cell(c.value(written, lead).replace(/\r\n?/g, '\n'))).join(','))
-  const overLimit = preset.maxValue ? ready.filter(({ written }) => written.body.length > (preset.maxValue ?? 0)).length : 0
+  const lines = ready.map(({ written, lead, steps }) => columns.map((c) => cell(c.value(written, lead, steps).replace(/\r\n?/g, '\n'))).join(','))
+  const tooLong = (body: string) => body.length > (preset.maxValue ?? 0)
+  const overLimit = preset.maxValue ? ready.filter(({ written, steps }) => (steps ?? [{ body: written.body }]).some((s) => s && tooLong(s.body))).length : 0
   return {
     name: sendToFileName(path, preset),
     csv: [columns.map((c) => c.name).join(','), ...lines].join('\r\n'),
     ready: ready.length,
     leftOut,
     overLimit,
+    stepSubjects: [channel === 'email', ...later.filter((c) => c.name.startsWith(messageColumn)).map((_, i) => later.some((c) => c.name === `${subjectColumn}_${i + 2}`))],
   }
+}
+
+/**
+ * Email 2 and later of a sequence for each person, as `amdahl_subject_2` and `amdahl_message_2`, the names
+ * the console's Send to reads (#2288, commit d9a53a2b9). An email's subject column is there only when some
+ * person's email has its own subject.
+ */
+function laterSteps(all: Array<StepEmail[] | undefined>, channel: Channel): Column[] {
+  const steps = all.reduce((top, s) => Math.max(top, s?.length ?? 1), 1)
+  const out: Column[] = []
+  for (let k = 1; k < steps; k++) {
+    if (channel === 'email' && all.some((s) => s?.[k]?.subject)) out.push({ name: `${subjectColumn}_${k + 1}`, value: (_w, _l, s) => s?.[k]?.subject ?? '' })
+    out.push({ name: `${messageColumn}_${k + 1}`, value: (_w, _l, s) => s?.[k]?.body ?? '' })
+  }
+  return out
 }
 
 /** `3 left out: 1 failed, 2 with no email.`, or null when none was left out. */
@@ -472,6 +496,23 @@ export function guideLines(preset: SendToPreset, channel: Channel): string[] {
   const email = channel === 'email'
   const variables = [...(email ? [`Subject ${preset.variable(subjectColumn)}`] : []), `${email ? 'Body' : 'Message'} ${preset.variable(messageColumn)}`]
   return [`Import: ${preset.where}`, preset.match(channel), `${preset.insert}: ${variables.join(', ')}`]
+}
+
+/**
+ * The steps for a tool that imports a whole sequence for each person: where to import, what to map, and one line
+ * for each email with its variables (`Email 2: Subject {{amdahl_subject_2}}, Body {{amdahl_message_2}}`).
+ * Outreach and Woodpecker name two fixed slots, so a later email's columns are named as they are.
+ */
+export function sequenceGuideLines(preset: SendToPreset, subjects: readonly boolean[]): string[] {
+  const fixed = preset.id === 'outreach' || preset.id === 'woodpecker'
+  const name = (k: number, column: string) => (fixed && k > 0 ? column : preset.variable(column))
+  const emails = subjects.map((s, k) => {
+    const suffix = k === 0 ? '' : `_${k + 1}`
+    const parts = [...(s ? [`Subject ${name(k, `${subjectColumn}${suffix}`)}`] : []), `Body ${name(k, `${messageColumn}${suffix}`)}`]
+    return `Email ${k + 1}: ${parts.join(', ')}`
+  })
+  const later = `Map ${messageColumn}_2 and each later email's columns the same way.`
+  return [`Import: ${preset.where}`, `${preset.match('email')} ${fixed ? `${preset.label} names two slots, so map each later email's columns to more custom fields.` : later}`, `${preset.insert}, one email per step:`, ...emails]
 }
 
 /** `2 messages ready for lemlist` (or `ready to import` for any tool). */
