@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { batchProblems, feedbackProblem, optimizeProblems, promptProblems, reportSendProblem, reportSendRejection, searchProblem } from './strict'
+import { batchProblems, pushLeadRefusal, stepsOfLeads, feedbackProblem, optimizeProblems, promptProblems, reportSendProblem, reportSendRejection, searchProblem } from './strict'
 
 /** The recipe library `GET /search/suggestions` answers with (2026-11-13): 14 recipes, each with its search question and fill-ins. */
 export const SUGGESTED_LIBRARY: Record<string, unknown>[] = JSON.parse(readFileSync(new URL('../fixtures/suggestions-library.json', import.meta.url), 'utf8'))
@@ -140,6 +140,8 @@ export interface MockOptions {
   sequencers?: { id: string; type: string; name: string }[]
   /** After this many pushes, a push answers 409 campaign_active, as when someone starts the campaign mid-command. */
   pushesBeforeLive?: number
+  /** How many email steps the campaigns' sequences have: a push with more emails per lead answers 409 campaign_missing_field (default: any). */
+  campaignSteps?: number
 }
 
 /** Every sequencer's campaigns in the mock, as `GET /connections/:id/campaigns` returns them. */
@@ -471,6 +473,12 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
           const campaign = SEQUENCER_CAMPAIGNS.find((c) => c.id === sub)
           if (!campaign) return err(res, 404, 'not_found', 'Campaign not found.')
           if (!Array.isArray(input.leads) || input.leads.length === 0 || input.leads.length > 100) return err(res, 400, 'too_many_leads', 'An API key or an agent can add up to 100 leads in one call.')
+          const refused = pushLeadRefusal(input.leads)
+          if (refused) return err(res, 400, refused.code, refused.message)
+          if (options.campaignSteps !== undefined && stepsOfLeads(input.leads) > options.campaignSteps) {
+            const step = options.campaignSteps + 1
+            return err(res, 409, 'campaign_missing_field', `This sequence does not use {{amdahl_message_${step}}}, so step ${step} would send the sequence's own text. Put {{amdahl_message_${step}}} in email step ${step}, then add the leads.`)
+          }
           if (campaign.status === 'active' || (options.pushesBeforeLive !== undefined && pushes.length >= options.pushesBeforeLive)) return err(res, 409, 'campaign_active', 'This campaign is live.')
           const known = pushes.find((p) => p.connection === connId && p.body.idempotency_key === input.idempotency_key)
           if (known) return json(res, 202, { data: { push_id: known.push_id } })

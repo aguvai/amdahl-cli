@@ -286,6 +286,11 @@ Amdahl adds the leads only: it never starts the campaign or sends an email.
   <file>            A CSV or JSONL file with an amdahl_message column, and an
                     email or linkedin_url for each lead. amdahl optimize
                     --list <list> --for other writes one.
+                    A lead may carry a whole sequence, up to 10 emails, as
+                    amdahl_subject_2, amdahl_message_2 and so on: the results
+                    file of amdahl sequence emails.md --leads leads.csv. Each
+                    email needs its own step in the campaign. A lead with an
+                    email that did not come back is left out and counted.
   <batch-id>        A finished batch. Name its list with --list.
   --campaign <id>   The campaign (amdahl sequencers campaigns lists them).
   --connection      The sequencer, when the workspace has more than one.

@@ -832,6 +832,14 @@ Added 38 to "Q4 founders" in Instantly. 0 skipped (already in the campaign), 0 f
   live one, or one whose status Amdahl cannot read, is refused before anything
   is sent. Amdahl never starts the campaign, sends an email, or edits or
   removes a lead.
+- **A whole sequence:** a file may carry up to 10 emails per lead, as
+  `amdahl_subject_2`, `amdahl_message_2` and so on (email 1 is
+  `amdahl_subject` and `amdahl_message`): the results file of `amdahl sequence
+  emails.md --leads leads.csv` is one. Each email needs its own step in the
+  campaign, or the sequencer refuses and the CLI says which step is missing. A
+  lead with an email that did not come back (or an `amdahl_status` other than
+  `written`) is left out and counted. A file that skips an email column is
+  refused before anything is sent. `--json` carries `emails_per_lead`.
 - **Leads:** a CSV or JSONL file with an `amdahl_message` column and an email
   or a `linkedin_url` per lead (the `--for other` file has both), or a finished
   batch with the list it was written from: `amdahl sequencers push <batch-id>

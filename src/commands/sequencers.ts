@@ -13,7 +13,9 @@
 // and with no terminal and no `--yes` it sends nothing (exit 2).
 //
 // The leads come from a CSV or JSONL file with an `amdahl_message` column (the
-// file `amdahl optimize --list <list> --for other` writes), or from a finished
+// file `amdahl optimize --list <list> --for other` writes; a whole sequence per
+// lead, up to 10 emails, as `amdahl_subject_N` and `amdahl_message_N`, in the
+// file `amdahl sequence` writes; see sequencer-leads.ts), or from a finished
 // batch and the list it was written from (`<batch-id> --list <list>`), read the
 // way `--for` reads it: only messages Amdahl wrote, with a contact for the
 // channel. More than 100 leads go in calls of 100. Each call's idempotency key
@@ -21,15 +23,14 @@
 // command again adds nothing twice.
 
 import { createHash } from 'node:crypto'
-import { extname } from 'node:path'
 import { amdahlCommand } from '../command-name'
 import { apiClient, call, resolveCredential, type Credential, type Ctx } from '../context'
 import { CliError, EXIT, usageError } from '../errors'
-import { readTextFile } from '../files'
+import { leadOf, leadsFromFile, snake, type Lead } from '../sequencer-leads'
 import { buildSendToFile, leftOutLine, planSendTo, presetFor, writtenOf, type LeftOut } from '../send-to'
 import { canAsk } from '../terminal'
 import { clip, count, field, record, records } from '../text'
-import { allItems, csvDelimiter, parseCsv, readList } from './batch'
+import { allItems, parseCsv, readList } from './batch'
 
 const PLATFORM = '/api/platform/v1'
 
@@ -52,20 +53,6 @@ const BATCH_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
 /** How many times `push` reads one push while it waits for it to finish (20 seconds each). */
 const MAX_READS = 30
 
-const LEAD_FIELDS = ['email', 'first_name', 'last_name', 'company', 'linkedin_url', 'amdahl_subject', 'amdahl_message'] as const
-type Lead = Partial<Record<(typeof LEAD_FIELDS)[number], string>>
-
-/** Header spellings, as snake_case, for each lead field: the `--for` files name some fields their tool's way. */
-const HEADER_NAMES: Record<(typeof LEAD_FIELDS)[number], string[]> = {
-  email: ['email', 'email_address', 'work_email'],
-  first_name: ['first_name', 'firstname'],
-  last_name: ['last_name', 'lastname'],
-  company: ['company', 'company_name', 'companyname'],
-  linkedin_url: ['linkedin_url', 'linkedinurl', 'linkedin', 'linkedin_profile'],
-  amdahl_subject: ['amdahl_subject'],
-  amdahl_message: ['amdahl_message'],
-}
-
 interface Connection {
   id: string
   type: string
@@ -78,15 +65,6 @@ interface Campaign {
   status: string
   url: string
 }
-
-const snake = (h: string) =>
-  h
-    .replace(/^﻿/, '')
-    .trim()
-    .replace(/([a-z])([A-Z])/g, '$1_$2')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
 
 // ---- The connection and the campaign ----
 
@@ -155,50 +133,10 @@ interface LeadsRead {
   leads: Lead[]
   leftOut: LeftOut | null
   channel: string
-}
-
-function leadOf(get: (f: (typeof LEAD_FIELDS)[number]) => string): Lead {
-  const lead: Lead = {}
-  for (const f of LEAD_FIELDS) {
-    const value = get(f).trim()
-    if (value) lead[f] = f === 'amdahl_message' ? get(f).replace(/\r\n?/g, '\n').trim() : value
-  }
-  return lead
-}
-
-/** A lead file: CSV with an `amdahl_message` column, or JSONL with one lead object a line. */
-function leadsFromFile(path: string): Lead[] {
-  const text = readTextFile(path)
-  const ext = extname(path).toLowerCase()
-  if (ext === '.jsonl' || ext === '.ndjson' || (ext !== '.csv' && text.trimStart().startsWith('{'))) {
-    return text
-      .split(/\r?\n/)
-      .map((line, i) => ({ line, i }))
-      .filter(({ line }) => line.trim())
-      .map(({ line, i }) => {
-        let obj: Record<string, unknown> | null = null
-        try {
-          obj = record(JSON.parse(line))
-        } catch {
-          obj = null
-        }
-        if (!obj) throw usageError(`Line ${i + 1} of ${path} is not a JSON object.`)
-        const o = obj
-        return leadOf((f) => field(o[f]))
-      })
-  }
-  const { rows } = parseCsv(text, csvDelimiter(text))
-  const [header, ...body] = rows
-  if (!header) throw usageError(`${path} is empty.`)
-  const names = header.map(snake)
-  const col = Object.fromEntries(LEAD_FIELDS.map((f) => [f, names.findIndex((n) => HEADER_NAMES[f].includes(n))])) as Record<(typeof LEAD_FIELDS)[number], number>
-  if (col.amdahl_message < 0) {
-    throw usageError(
-      `${path} has no amdahl_message column.`,
-      `Push a file that holds the messages Amdahl wrote: ${amdahlCommand('optimize --list <list.csv> --for other')} writes one, or push a finished batch with ${amdahlCommand('sequencers push <batch-id> --list <list.csv> --campaign <id>')}.`
-    )
-  }
-  return body.map((cells) => leadOf((f) => (col[f] >= 0 ? (cells[col[f]] ?? '') : '')))
+  /** How many emails each lead carries. */
+  emails: number
+  /** Rows of a file left out because an email did not come back. */
+  rowsLeftOut: number
 }
 
 /** A finished batch and its list, read the way `--for other` reads them. */
@@ -226,12 +164,17 @@ async function leadsFromBatch(ctx: Ctx, credential: Credential, id: string, list
   const [header, ...body] = rows
   const names = (header ?? []).map(snake)
   const at = (cells: string[], f: string) => (names.indexOf(f) >= 0 ? (cells[names.indexOf(f)] ?? '') : '')
-  return { leads: body.map((cells) => leadOf((f) => at(cells, f))), leftOut: built.leftOut, channel: plan.channel }
+  return { leads: body.map((cells) => leadOf((f) => at(cells, f))), leftOut: built.leftOut, channel: plan.channel, emails: 1, rowsLeftOut: 0 }
+}
+
+function fromFile(path: string, channel: string | undefined): LeadsRead {
+  const file = leadsFromFile(path)
+  return { leads: file.leads, leftOut: null, channel: channel ?? '', emails: file.emails, rowsLeftOut: file.leftOut }
 }
 
 /** Refuse a lead file the server would refuse, before anything is sent. */
-function checkLeads(leads: Lead[], source: string): void {
-  if (leads.length === 0) throw usageError(`${source} has no leads with a message.`)
+function checkLeads(leads: Lead[], source: string, leftOut = 0): void {
+  if (leads.length === 0) throw usageError(leftOut ? `${source} has no lead with every email written: ${leftOut} left out.` : `${source} has no leads with a message.`)
   if (leads.length > MAX_LEADS) throw usageError(`${source} has ${count(leads.length, 'lead')}. One command adds up to ${MAX_LEADS.toLocaleString('en-US')}.`, 'Split the file.')
   const missing = leads.findIndex((l) => !l.amdahl_message)
   if (missing >= 0) throw usageError(`Lead ${missing + 1} of ${source} has no amdahl_message.`)
@@ -264,6 +207,14 @@ async function waitForPush(ctx: Ctx, client: ReturnType<typeof apiClient>, conne
   return { push_id: pushId, status: field(read.status), counts: { added: n(c.added), skipped: n(c.skipped), failed: n(c.failed) } }
 }
 
+/** The server's refusal of a campaign with no step for an email, with a plain line before its own message. */
+function stepRefusal(err: unknown): unknown {
+  if (!(err instanceof CliError) || err.code !== 'campaign_missing_field') return err
+  const step = /(?:amdahl_(?:message|subject)_|step )(\d+)/.exec(err.message)?.[1]
+  const plain = step ? `The campaign has no step for email ${step}. Add it in the sequencer.` : 'The campaign has fewer steps than the emails in the file. Add the missing steps in the sequencer.'
+  return new CliError(err.code, `${plain} ${err.message}`, err.exit, err.hint, err.detail, err.data)
+}
+
 /** `amdahl sequencers push <file|batch-id> --campaign <id> [--connection <c>] [--list <file>] [--channel email|linkedin] [--yes]`. */
 export async function sequencersPush(ctx: Ctx, args: string[]): Promise<number> {
   const usage = `Usage: ${amdahlCommand('sequencers push <file|batch-id> --campaign <id> [--connection <id|type>] [--yes]')}`
@@ -282,8 +233,8 @@ export async function sequencersPush(ctx: Ctx, args: string[]): Promise<number> 
 
   const credential = await resolveCredential(ctx)
   const client = apiClient(ctx, credential)
-  const read: LeadsRead = isBatch ? await leadsFromBatch(ctx, credential, source, listPath ?? '', flagChannel) : { leads: leadsFromFile(source), leftOut: null, channel: flagChannel ?? '' }
-  checkLeads(read.leads, isBatch ? `Batch ${source}` : source)
+  const read: LeadsRead = isBatch ? await leadsFromBatch(ctx, credential, source, listPath ?? '', flagChannel) : fromFile(source, flagChannel)
+  checkLeads(read.leads, isBatch ? `Batch ${source}` : source, read.rowsLeftOut)
 
   const connection = await pickConnection(client, typeof ctx.flags.connection === 'string' ? ctx.flags.connection : undefined)
   const campaign = (await readCampaigns(client, connection)).find((c) => c.id === campaignId)
@@ -300,9 +251,11 @@ export async function sequencersPush(ctx: Ctx, args: string[]): Promise<number> 
   }
 
   const calls = Math.ceil(read.leads.length / LEADS_PER_CALL)
-  const summary = `Add ${count(read.leads.length, 'lead')} to the ${statusWord(campaign.status)} ${connection.name} campaign "${clip(campaign.name, 60)}" (${campaign.id})${calls > 1 ? `, in ${calls} calls of up to ${LEADS_PER_CALL}` : ''}.`
+  const each = read.emails > 1 ? `, ${read.emails} emails each,` : ''
+  const summary = `Add ${count(read.leads.length, 'lead')}${each} to the ${statusWord(campaign.status)} ${connection.name} campaign "${clip(campaign.name, 60)}" (${campaign.id})${calls > 1 ? `, in ${calls} calls of up to ${LEADS_PER_CALL}` : ''}.`
   const other = presetFor('other')
-  const left = read.leftOut && other ? leftOutLine(read.leftOut, read.channel === 'linkedin' ? 'linkedin' : 'email', other) : null
+  const batchLeft = read.leftOut && other ? leftOutLine(read.leftOut, read.channel === 'linkedin' ? 'linkedin' : 'email', other) : null
+  const left = batchLeft ?? (read.rowsLeftOut ? `${read.rowsLeftOut} left out: an email did not come back.` : null)
   if (!yes) {
     ctx.out.info(summary)
     if (left) ctx.out.info(left)
@@ -327,7 +280,8 @@ export async function sequencersPush(ctx: Ctx, args: string[]): Promise<number> 
       const pushId = field(started.push_id)
       if (calls > 1 && !ctx.out.json) ctx.out.info(`Call ${part + 1} of ${calls} sent.`)
       pushes.push(await waitForPush(ctx, client, connection, pushId))
-    } catch (err) {
+    } catch (thrown) {
+      const err = stepRefusal(thrown)
       // An earlier call already added leads: say so, so nobody reads the error as "nothing was added".
       if (part > 0 && err instanceof CliError) {
         const done = sum()
@@ -350,6 +304,6 @@ export async function sequencersPush(ctx: Ctx, args: string[]): Promise<number> 
     ...(ok ? [] : ['A push did not finish. Read it again in a minute, or check the campaign in the sequencer before you push the same leads again.']),
     'Amdahl did not start the campaign: start it in the sequencer when the messages look right.',
   ].join('\n')
-  ctx.out.result({ ok, connection, campaign, counts: total, pushes, left_out: read.leftOut }, human)
+  ctx.out.result({ ok, connection, campaign, counts: total, pushes, left_out: read.leftOut, emails_per_lead: read.emails, leads_left_out: read.rowsLeftOut }, human)
   return ok ? EXIT.ok : EXIT.general
 }

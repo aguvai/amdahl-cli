@@ -258,3 +258,50 @@ export function promptProblems(input: unknown): string[] {
   }
   return errors
 }
+
+// ── connections.push_leads, a sequence per lead: sequencerPush/stepFields.ts, push.ts and
+// connections/pushLeads.ts. Email 1 is amdahl_subject / amdahl_message; email N (2 to 10) is
+// amdahl_subject_N / amdahl_message_N. A subject is at most 500 characters, a message 1 to 20,000.
+// A lead that sends email N needs a message for every email before it (400 step_missing), and a
+// step past 10 is refused (400 too_many_steps).
+
+export const MAX_STEP = 10
+const STEP_KEY = /^amdahl_(subject|message)_(\d+)$/
+
+/** The first refusal of a push's leads, as the server words it, or null when they pass. */
+export function pushLeadRefusal(leads: Record<string, unknown>[]): { code: string; message: string } | null {
+  for (const [index, lead] of leads.entries()) {
+    const at = `Lead ${index + 1}`
+    let top = 1
+    for (const [key, value] of Object.entries(lead)) {
+      const m = STEP_KEY.exec(key)
+      if (!m) continue
+      if (Number(m[2]) > MAX_STEP) return { code: 'too_many_steps', message: `${at} has ${key}. A sequence holds at most ${MAX_STEP} steps.` }
+      if (typeof value === 'string' && value.length > 0) top = Math.max(top, Number(m[2]))
+    }
+    for (let step = 2; step <= top; step++) {
+      if (typeof lead[`amdahl_message_${step}`] !== 'string' || lead[`amdahl_message_${step}`] === '') {
+        return { code: 'step_missing', message: `${at} has a later email but no amdahl_message_${step} for step ${step}. Send every step in order.` }
+      }
+    }
+    for (let step = 1; step <= MAX_STEP; step++) {
+      const subject = lead[step === 1 ? 'amdahl_subject' : `amdahl_subject_${step}`]
+      const message = lead[step === 1 ? 'amdahl_message' : `amdahl_message_${step}`]
+      if (typeof subject === 'string' && subject.length > 500) return { code: 'validation_error', message: `${at}.amdahl_subject: String must contain at most 500 character(s)` }
+      if (typeof message === 'string' && (message.length < 1 || message.length > 20_000)) return { code: 'validation_error', message: `${at}.amdahl_message: String must contain 1 to 20000 character(s)` }
+    }
+  }
+  return null
+}
+
+/** The highest email a push's leads carry. */
+export function stepsOfLeads(leads: Record<string, unknown>[]): number {
+  let top = 1
+  for (const lead of leads) {
+    for (const [key, value] of Object.entries(lead)) {
+      const m = STEP_KEY.exec(key)
+      if (m && typeof value === 'string' && value.length > 0) top = Math.max(top, Number(m[2]))
+    }
+  }
+  return top
+}
