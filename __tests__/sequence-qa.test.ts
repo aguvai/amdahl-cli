@@ -82,7 +82,7 @@ describe('S1 and S2: what starts an email', () => {
 
   it('Email 1 - Intro with an en dash, Day 3, Email 2 (2 days later) and Step 2: Break-up email start an email', async () => {
     const io = await withKey()
-    await cli(io, 'sequence', put(io, 'x.md', 'Email 1 – Intro\nA.\nDay 3\nB.\nEmail 4 (2 days later)\nC.\nStep 5: Break-up email\nD.'))
+    await cli(io, 'sequence', put(io, 'x.md', 'Email 1 \u2013 Intro\nA.\nDay 3\nB.\nEmail 4 (2 days later)\nC.\nStep 5: Break-up email\nD.'))
     expect(bodies().map((b) => b.message)).toEqual(['A.', 'B.', 'C.', 'D.'])
   })
 
@@ -177,7 +177,7 @@ describe('S5 and S8: the rules of a written sequence', () => {
     expect(rulesOf(0)).toHaveLength(3)
     expect(rulesOf(2).slice(-3)).toEqual(['Greet the reader with {{first_name}} so the sequencer fills it in.', 'Email 3 replies in the same thread as email 1, so it has no subject line.', 'Do not name the date or day of an earlier email: the send dates are not set yet.'])
     expect(r.json.emails.map((e: { subject: string | null }) => e.subject)).toEqual(['Hello 1', null, null])
-    expect(readFileSync(join(io.cwd, 'sequence-amdahl.csv'), 'utf8')).toBe('﻿Email,Subject,Message\r\n1,Hello 1,Written 1.\r\n2,,Written 2.\r\n3,,Written 3.')
+    expect(readFileSync(join(io.cwd, 'sequence-amdahl.csv'), 'utf8')).toBe('\uFEFFEmail,Subject,Message\r\n1,Hello 1,Written 1.\r\n2,,Written 2.\r\n3,,Written 3.')
   })
 
   it('improving adds no rule', async () => {

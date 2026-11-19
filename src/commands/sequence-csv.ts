@@ -90,7 +90,7 @@ function reason(err: unknown): string {
  */
 export function saveCsv(path: string, finals: FinalEmail[], force: boolean): string | null {
   try {
-    writeFileSync(path, `﻿${sequenceCsv(finals)}`, { flag: force ? 'w' : 'wx' })
+    writeFileSync(path, `\uFEFF${sequenceCsv(finals)}`, { flag: force ? 'w' : 'wx' })
     return null
   } catch (err) {
     return `Could not save ${path}: ${reason(err)}.`
