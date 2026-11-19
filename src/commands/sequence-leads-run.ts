@@ -53,6 +53,8 @@ export interface Halt {
   code: string
   /** Runs left in the month, when the server said (`details.remaining`). */
   remaining?: number
+  /** The batches were sent but their reads were lost, so Amdahl may still be writing them. */
+  lost?: boolean
 }
 
 const FAILURES: Record<string, string> = {
@@ -161,15 +163,21 @@ export async function runPeople(ctx: Ctx, credential: Credential, src: PeopleSou
       const p = byRow.get(rowOfItem(item.item_id, 0))
       if (p) p.failed = { at: k, reason: failureWords('too_large') }
     }
-    const halt = await runStep(ctx, credential, client, src, k, n, parts, byRow)
+    const halt = await runStep(ctx, credential, client, src, k, n, parts, byRow, onStep)
     onStep()
     if (halt) return halt
   }
   return null
 }
 
-/** Send the batches of one step, read them all, and settle each person. Returns the halt, if any. */
-async function runStep(ctx: Ctx, credential: Credential, client: ReturnType<typeof apiClient>, src: PeopleSource, k: number, n: number, parts: Record<string, unknown>[][], byRow: Map<number, PersonState>): Promise<Halt | null> {
+/**
+ * Send the batches of one step, read them all, and settle each person. A part
+ * whose reads are lost does not stop the others: they are queued and billed, so
+ * each is still read. Only the lost part's people stay unwritten. `onPart` runs
+ * after each part, so the results file keeps what came back. Returns the halt,
+ * if any.
+ */
+async function runStep(ctx: Ctx, credential: Credential, client: ReturnType<typeof apiClient>, src: PeopleSource, k: number, n: number, parts: Record<string, unknown>[][], byRow: Map<number, PersonState>, onPart: () => void): Promise<Halt | null> {
   const sent: { id: string; people: Map<number, PersonState> }[] = []
   let halt: Halt | null = null
   for (const part of parts) {
@@ -186,12 +194,19 @@ async function runStep(ctx: Ctx, credential: Credential, client: ReturnType<type
     sent.push({ id, people })
   }
   const track: Track = { k, n, done: 0, total: sent.reduce((sum, b) => sum + b.people.size, 0), shownAt: ctx.io.now() }
+  let lost: Halt | null = null
+  let unread = 0
   for (const [i, batch] of sent.entries()) {
-    const lost = await readBatch(ctx, credential, client, batch.id, track, batch.people, src, i === sent.length - 1)
-    if (lost) return lost
-    for (const p of batch.people.values()) if (!p.failed && !p.finals[k]) p.failed = { at: k, reason: failureWords('') }
+    const gone = await readBatch(ctx, credential, client, batch.id, track, batch.people, src, i === sent.length - 1)
+    if (gone) {
+      lost = gone
+      unread += 1
+    } else for (const p of batch.people.values()) if (!p.failed && !p.finals[k]) p.failed = { at: k, reason: failureWords('') }
+    onPart()
   }
-  return halt
+  if (!lost) return halt
+  const them = unread === 1 ? 'it' : 'them'
+  return { ...lost, reason: `${unread} ${unread === 1 ? 'batch' : 'batches'} for email ${k + 1} could not be read: ${lost.reason} Amdahl may still be writing ${them}: run again with --resume later.`, lost: true }
 }
 
 /** Read one batch until it completes, settling each person as their email comes back. Returns the halt when the reads are lost. */
@@ -211,7 +226,7 @@ async function readBatch(ctx: Ctx, credential: Credential, client: ReturnType<ty
       if (misses >= 3) {
         const e = toCliError(err)
         show(ctx, track, progressText(track), true)
-        return { at: k, reason: `${e.message} The batch is still running, and its emails are not in the results.`, ...(e.hint ? { hint: e.hint } : {}), exit: e.exit, code: e.code }
+        return { at: k, reason: e.message, ...(e.hint ? { hint: e.hint } : {}), exit: e.exit, code: e.code }
       }
       await ctx.io.sleep(2000 * misses)
       continue

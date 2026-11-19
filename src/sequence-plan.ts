@@ -74,12 +74,28 @@ export function suggestPlan(goal: string, n: number): PlanStep[] {
 
 const lowerFirst = (text: string) => (text ? text[0]!.toLowerCase() + text.slice(1) : text)
 
-/** The two rules email `index` (from 0) is written from: the goal, and its place and job in the plan. */
-export function planRules(goal: string, steps: PlanStep[], index: number): string[] {
+/** The most rules a written email gets from the plan: the goal, its place, the greeting, the thread rule and the date rule. */
+export const MAX_PLAN_RULES = 5
+
+export const FIRST_NAME_RULE = 'Greet the reader with {{first_name}} so the sequencer fills it in.'
+export const NO_DATE_RULE = 'Do not name the date or day of an earlier email: the send dates are not set yet.'
+export const threadRule = (n: number) => `Email ${n} replies in the same thread as email 1, so it has no subject line.`
+
+/**
+ * The rules email `index` (from 0) is written from: the goal, its place and
+ * job in the plan, the greeting (a template is one set of emails for anyone;
+ * a sequence written for one person does not greet with a fill-in field), and
+ * for an email after the first, the thread rule and the date rule. The same
+ * order as the console's planRules.
+ */
+export function planRules(goal: string, steps: PlanStep[], index: number, template = true): string[] {
   const step = steps[index] as PlanStep
   const job = step.job.trim().replace(/[.\s]+$/, '')
   const line = `This is email ${index + 1} of ${steps.length}: ${step.name.trim() || `Email ${index + 1}`}.${job ? ` Its job: ${lowerFirst(job)}.` : ''}`
-  return [`This sequence: ${goal.trim()}`, line].map((rule) => rule.slice(0, MAX_RULE_CHARS))
+  const rules = [`This sequence: ${goal.trim()}`, line]
+  if (template) rules.push(FIRST_NAME_RULE)
+  if (index > 0) rules.push(threadRule(index + 1), NO_DATE_RULE)
+  return rules.map((rule) => rule.slice(0, MAX_RULE_CHARS))
 }
 
 /** A step as one line: `Name: job`, or the name alone. */

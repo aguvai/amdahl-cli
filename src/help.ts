@@ -125,7 +125,7 @@ ${GLOBAL}`,
 
   sequence: `Usage: amdahl sequence <file> | -  [--evidence off|workspace]
                        [--on-unsupported flag|remove] [--context <file.json>]
-                       [--csv [<file.csv>]] [--force]
+                       [--csv [<file.csv>]] [--force] [--from <n>]
        amdahl sequence --write "<goal>" [--emails <2-6>] [--plan <file>]
                        [--context <file.json>] [--csv [<file.csv>]] [--force]
        amdahl sequence <file> --leads <list.csv> [--match <field>=<column>]
@@ -139,8 +139,12 @@ Improve a sequence of 2 to 10 emails, or write a new one of 2 to 6. The emails
 run in order, and each is written as a follow-up to the improved emails before
 it. Each email is one request, so a sequence of 4 is 4 runs.
 
-The file is text or markdown, or "-" for standard input. A line of --- or a
-short heading such as "Email 2" or "Follow-up" starts the next email. An email
+The file is text or markdown, or "-" for standard input. A line of --- starts
+the next email, and so does a label line: Email, Step, Touch, Message, Day or
+Follow-up with a number, then maybe (...) and a title of up to 5 words, such as
+"Email 2", "Day 3" or "Step 2: Break-up email". A line that ends in . ? or !
+after the colon is text, not a break. At a terminal it lists what it found
+before it sends anything. An email
 may start with a Subject: line. Email 1 keeps its subject. A later email with a
 Subject: line starts a new thread and keeps it. A later email with none is a
 reply in the same thread and goes with no subject:
@@ -156,7 +160,9 @@ reply in the same thread and goes with no subject:
   Hi {{first_name}}, should I stop reaching out?
 
 A CSV file has one column for each email, step_1_body, step_2_body and so on,
-and may have step_1_subject and so on. The first row with text is the sequence.
+and may have step_1_subject and so on. The first row with text is the sequence;
+with more rows it says so. The file --csv saves (Email, Subject, Message, one
+row for each email) reads back the same way.
 
 Fill-in fields such as {{first_name}} are sent as they are. After the last
 email it says whether each field is still there, and names the emails that lost
@@ -179,10 +185,27 @@ one.
                                Email, Subject and Message. With no name, it is
                                next to the file (emails.md gives
                                emails-amdahl.csv), or sequence-amdahl.csv here.
-                               Put it after the file. A name ends in .csv.
+                               Put it after the file. A name ends in .csv. The
+                               folder must exist. The file starts with a UTF-8
+                               byte order mark, so a spreadsheet reads accents.
   --force                      With --csv: replace a file that already exists.
+  --from <n>                   Improve from email n, after a run that stopped.
+                               It reads emails 1 to n-1 from the CSV that run
+                               saved (--csv <file.csv>, or the default name
+                               next to the file) and writes it back whole.
 
-At a terminal, --write shows the plan and asks "Write these N emails?". An
+It says how long it takes ("About 3 minutes in all") and, at a terminal,
+shows the seconds for the email it is on. Ctrl+C stops after saving the emails
+that came back (with --csv, or at a terminal) and exits 130; each email's run id
+is printed, and --from picks up. A closed pipe (| head) stops before the next
+email. At a terminal, a finished run asks "Save as <name>-amdahl.csv?".
+
+A written sequence: email 2 and later reply in email 1's thread, so they have
+no subject, and are told not to name an earlier email's date. A template for
+anyone (no --leads) greets with {{first_name}}.
+
+At a terminal, --write shows the plan and asks "Write these N emails?", after
+checking you are signed in (it signs you in first). An
 agent, CI, a pipe or --json is not asked. With no file and no --write, at a
 terminal, it asks what to do: improve emails you paste, or write a new sequence.
 

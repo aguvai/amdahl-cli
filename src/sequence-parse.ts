@@ -54,15 +54,28 @@ export const NO_STEPS = 'No email columns in this file. Name one column for each
 
 const newEmail = (index: number, over: Partial<SeqEmail> = {}): SeqEmail => ({ subject: '', body: '', sameThread: index > 0, ...over })
 
-const HEAD_LABEL = String.raw`(?:(?:email|step|touch|message|follow[ -]?up)\s*#?\s*\d+|follow[ -]?up)`
-const HEAD = new RegExp(String.raw`^\s*(?:#+\s*)?\**\s*${HEAD_LABEL}\s*(?:[:.\-]\s*.*|\(.*\)\s*:?)?\s*\**\s*$`, 'i')
+const HEAD = /^\s*(?:#+\s*)?\**\s*(?:(?:email|step|touch|message|day|follow[ -]?up)\s*#?\s*\d+|follow[ -]?up)(?!\w)\s*(?:\([^)]*\))?\s*(?:[:.\-\u2013\u2014]\s*(.*?))?\s*\**\s*:?\s*$/i
 const RULE = /^\s*-{3,}\s*$/
-
-const isHead = (line: string) => RULE.test(line) || (line.trim().length < 60 && HEAD.test(line))
+const TITLE_WORDS = 5
 
 /**
- * Split text into emails: a line of `---`, or a short heading such as `Email 2`,
- * `Step 3` or `Follow-up`, starts the next one. A leading `Subject:` line is
+ * A label line is a break only with no title or a short title (at most 5 words,
+ * not ending in `.`, `?` or `!`), under 60 characters, so "Step 1: connect your
+ * TMS." stays in its email. The console applies the same rule (isHead).
+ */
+function isLabel(line: string): boolean {
+  if (line.trim().length >= 60) return false
+  const m = HEAD.exec(line)
+  if (!m) return false
+  const title = (m[1] ?? '').trim()
+  return !title || (title.split(/\s+/).length <= TITLE_WORDS && !/[.?!]$/.test(title))
+}
+
+const isHead = (line: string) => RULE.test(line) || isLabel(line)
+
+/**
+ * Split text into emails: a line of `---`, or a label line such as `Email 2`,
+ * `Day 3` or `Step 2: Break-up email` (see isLabel), starts the next one. A leading `Subject:` line is
  * that email's subject. A part with no body is dropped.
  */
 export function splitSequence(text: string): SeqEmail[] {
@@ -128,8 +141,21 @@ function bodyColumns(header: string[], data: string[][]): number[] {
   return body.length > 0 ? body : where((h) => LINE_HEADERS.includes(h)).slice(0, 1)
 }
 
+/**
+ * The emails of this CLI's own `--csv` file (`Email,Subject,Message`, one email
+ * for each row, numbered from 1), or null when the table is not that file.
+ */
+export function ownCsvEmails(rows: string[][]): FinalEmail[] | null {
+  const header = (rows[0] ?? []).map(normHeader)
+  if (header.length !== 3 || header[0] !== 'email' || header[1] !== 'subject' || header[2] !== 'message') return null
+  const data = rows.slice(1).filter((r) => r.some((c) => c.trim()))
+  if (data.length === 0 || !data.every((r, i) => (r[0] ?? '').trim() === String(i + 1))) return null
+  const plain = (v: string) => v.trim().replace(/^'(?=[=+\-@\t\r])/, '')
+  return data.map((r) => ({ subject: plain(r[1] ?? '') || null, body: plain(r[2] ?? '') }))
+}
+
 /** What a CSV read as: the emails, or the sentence that says why not. */
-export type UploadRead = { ok: true; emails: SeqEmail[] } | { ok: false; error: string }
+export type UploadRead = { ok: true; emails: SeqEmail[]; rows: number } | { ok: false; error: string }
 
 /**
  * Read a CSV or TSV with one body column for each email (`step_1_body`,
@@ -139,6 +165,8 @@ export type UploadRead = { ok: true; emails: SeqEmail[] } | { ok: false; error: 
  */
 export function emailsFromCsv(text: string): UploadRead {
   const { rows } = parseCsv(text, csvDelimiter(text))
+  const own = ownCsvEmails(rows)
+  if (own) return { ok: true, emails: own.map((f, i) => newEmail(i, { subject: f.subject ?? '', body: f.body, sameThread: i > 0 && !f.subject })), rows: 1 }
   const header = (rows[0] ?? []).map(normHeader)
   const data = rows.slice(1)
   let cols = bodyColumns(header, data)
@@ -169,7 +197,8 @@ export function emailsFromCsv(text: string): UploadRead {
   let last = parts.length - 1
   while (last >= 0 && !parts[last]?.body) last--
   const emails = parts.slice(0, last + 1).map((p, i) => newEmail(i, { subject: p.subject, body: p.body, sameThread: i > 0 && !p.subject }))
-  return { ok: true, emails }
+  const withText = data.filter((r) => cols.some((c) => (r[c] ?? '').trim())).length
+  return { ok: true, emails, rows: withText }
 }
 
 /** Whether email `i` is sent with its subject: the first, or a new thread. */

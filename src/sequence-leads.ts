@@ -27,18 +27,18 @@ export const stepCount = (src: PeopleSource) => (src.kind === 'improve' ? src.em
 
 /** Email k for one person: as typed with their fields filled in, or a blank one to write. */
 export function stepEmail(src: PeopleSource, k: number, lead: Lead): SeqEmail {
-  if (src.kind === 'write') return { subject: '', body: '', sameThread: false }
+  if (src.kind === 'write') return { subject: '', body: '', sameThread: k > 0 }
   const e = src.emails[k] as SeqEmail
   return { ...e, subject: fillFor(e.subject, lead, src.matches), body: fillFor(e.body, lead, src.matches) }
 }
 
-/** Whether email k has a subject: a written one always, an improved one when it starts a thread. */
-export const hasSubject = (src: PeopleSource, k: number) => src.kind === 'write' || showsSubject(src.emails[k] as SeqEmail, k)
+/** Whether email k has a subject: a written one only for email 1 (the rest reply in its thread), an improved one when it starts a thread. */
+export const hasSubject = (src: PeopleSource, k: number) => (src.kind === 'write' ? k === 0 : showsSubject(src.emails[k] as SeqEmail, k))
 
 /** One person's batch item for email k: their row, and their OWN earlier emails as prior touches. Throws a sentence when the email does not fit. */
 export function personItem(src: PeopleSource, k: number, lead: Lead, table: LeadTable, earlier: readonly FinalEmail[]): Record<string, unknown> {
   const draft = src.kind === 'improve' ? sentMessage(stepEmail(src, k, lead), k) : ''
-  const rules = src.kind === 'write' ? planRules(src.goal, src.steps, k) : []
+  const rules = src.kind === 'write' ? planRules(src.goal, src.steps, k, false) : []
   const item = leadItem({ ...lead, draft }, table, rules)
   const touches = earlier.map((f) => touchOf(f)).filter((t) => t.summary)
   if (touches.length === 0) return item

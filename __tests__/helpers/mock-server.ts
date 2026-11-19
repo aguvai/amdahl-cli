@@ -194,6 +194,8 @@ export interface MockOptions {
   onBatch?: (position: number, body: string) => void
   /** Every read of a batch is answered with this error. */
   batchReadRefuse?: { status: number; code: string; message: string }
+  /** With `batchReadRefuse`: refuse the reads of only these batches, by the order they were sent from 1. */
+  batchReadRefuseOnly?: number[]
 }
 
 export interface MockServer {
@@ -554,7 +556,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
         // A malformed id and an unknown id are one not-found, as on the real route.
         const entry = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(batch[1] ?? '') ? batches.get(batch[1] ?? '') : undefined
         if (!entry) return err(res, 404, 'not_found')
-        if (options.batchReadRefuse) return err(res, options.batchReadRefuse.status, options.batchReadRefuse.code, options.batchReadRefuse.message)
+        if (options.batchReadRefuse && (!options.batchReadRefuseOnly || options.batchReadRefuseOnly.includes(Number((batch[1] ?? '').slice(-12))))) return err(res, options.batchReadRefuse.status, options.batchReadRefuse.code, options.batchReadRefuse.message)
         entry.polls++
         const reads = options.batchPolls ?? 1
         const finishedMode = ['true', '1'].includes(url.searchParams.get('only_finished') ?? '') || url.searchParams.has('finished_since')

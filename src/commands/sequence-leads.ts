@@ -102,7 +102,7 @@ function summaryLine(emails: number, people: PersonState[], halt: Halt | null, d
   }
   const parts = stopped.length ? ` ${stopped.length} stopped: ${[...groups].map(([key, n]) => `${n} ${key}`).join(', ')}.` : ''
   const left = halt?.remaining === undefined ? '' : ` ${halt.remaining} ${halt.remaining === 1 ? 'run is' : 'runs are'} left.`
-  if (halt) return `${head}${parts} Email ${halt.at + 1} was refused: ${sentence(halt.reason)}${left}${halt.hint ? ` ${halt.hint}` : ''}`
+  if (halt) return `${head}${parts} Email ${halt.at + 1} ${halt.lost ? 'was not finished' : 'was refused'}: ${sentence(halt.reason)}${left}${halt.hint ? ` ${halt.hint}` : ''}`
   if (declined) return `${head}${parts} The other ${people.length - written - stopped.length} were not written.`
   return `${head}${parts}`
 }

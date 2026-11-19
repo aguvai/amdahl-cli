@@ -316,6 +316,7 @@ describe('writing a sequence for each person', () => {
     const rules = (k: number) => [
       'This sequence: Book a first meeting.',
       k === 1 ? 'This is email 1 of 2: Opener. Its job: why now.' : 'This is email 2 of 2: Last try. Its job: close politely.',
+      ...(k > 1 ? ['Email 2 replies in the same thread as email 1, so it has no subject line.', 'Do not name the date or day of an earlier email: the send dates are not set yet.'] : []),
     ]
     const [one, two] = batches()
     expect(one).toEqual([
@@ -327,7 +328,7 @@ describe('writing a sequence for each person', () => {
       { item_id: 'row-3', channel: 'email', recipient: PARK, context: { rules: rules(2), facts: ['Recipient: Park at Northwind', 'Notes: Raised a Series B'], prior_touches: [touch('Subject: Opener 1 for Park\n\nWritten for Park.')] } },
     ])
     expect(read(io, 'leads-amdahl-sequence.csv').split('\r\n')[1]).toBe(
-      'Sam,Lee,sam@example.com,Acme,Posted about onboarding,Opener 1 for Sam Lee,Written for Sam Lee.,Last try 2 for Sam Lee,Written for Sam Lee after: Subject: Opener 1 for Sam Lee.,written'
+      'Sam,Lee,sam@example.com,Acme,Posted about onboarding,Opener 1 for Sam Lee,Written for Sam Lee.,Written for Sam Lee after: Subject: Opener 1 for Sam Lee.,written'
     )
   })
 
@@ -351,8 +352,6 @@ describe('writing a sequence for each person', () => {
         'Written for Sam Lee.',
         '',
         'Email 2 of 2: Last try',
-        'Subject: Last try 2 for Sam Lee',
-        '',
         'Written for Sam Lee after: Subject: Opener 1 for Sam Lee.',
         '',
       ].join('\n')
@@ -370,7 +369,7 @@ describe('writing a sequence for each person', () => {
     expect(r.stderr).toContain(`To write the rest: amdahl sequence --write 'Book a first meeting.' --leads ${leads} --emails 2 --resume`)
     const rows = read(io, 'leads-amdahl-sequence.csv').split('\r\n')
     expect(rows[1]?.endsWith(',written')).toBe(true)
-    expect(rows[2]).toBe(',Park,jo@example.com,Northwind,Raised a Series B,,,,,not written yet')
+    expect(rows[2]).toBe(',Park,jo@example.com,Northwind,Raised a Series B,,,,not written yet')
   })
 })
 
@@ -455,11 +454,11 @@ describe('--for', () => {
     )
   })
 
-  it('names email 2\'s subject column in the mapping step when email 2 has its own subject', async () => {
+  it('does not name email 2\'s subject column in the mapping step: a written reply has no subject', async () => {
     const io = await withKey()
     const r = await cli(io, 'sequence', '--write', 'Book a first meeting.', '--emails', '2', '--leads', file(io, 'leads.csv', LEADS), '--for', 'instantly')
     expect(r.code).toBe(0)
-    expect(r.stderr.replace(/\n\s+/g, ' ')).toContain("Map amdahl_subject_2, amdahl_message_2 and each later email's columns the same way.")
+    expect(r.stderr.replace(/\n\s+/g, ' ')).toContain("Map amdahl_message_2 and each later email's columns the same way.")
   })
 
   it('leaves out a person who is missing an email, and counts them', async () => {
@@ -830,8 +829,29 @@ describe('a refused batch', () => {
     const io = await withKey({ batchReadRefuse: { status: 401, code: 'unauthenticated', message: 'No.' } })
     const r = await cli(io, 'sequence', file(io, 'emails.md', EMAILS), '--leads', file(io, 'leads.csv', LEADS))
     expect(r.code).not.toBe(0)
-    expect(r.stderr).toContain('The batch is still running, and its emails are not in the results.')
+    expect(r.stderr).toContain('1 batch for email 1 could not be read: ')
+    expect(r.stderr).toContain(' Amdahl may still be writing it: run again with --resume later.')
     expect(r.stderr).toContain('Run `amdahl login`, or check AMDAHL_KEY.')
+  })
+})
+
+describe('a step whose part is lost', () => {
+  const NOTE = 'n'.repeat(1000)
+
+  it('still reads the step\'s other parts, saves after each part, and says how many batches could not be read', async () => {
+    const io = await withKey({ batchReadRefuse: { status: 500, code: 'server_error', message: 'Down.' }, batchReadRefuseOnly: [1] })
+    const r = await cli(io, 'sequence', file(io, 'emails.md', TWO), '--leads', file(io, 'leads.csv', manyPeople(500, NOTE)))
+    expect(r.code).not.toBe(0)
+    expect(posts()).toHaveLength(2)
+    const reads = (server?.log ?? []).filter((x) => x.method === 'GET' && x.path.startsWith(`${BATCH}es/`)).map((x) => x.path.slice(-12))
+    expect(new Set(reads)).toEqual(new Set(['000000000001', '000000000002']))
+    expect(r.stderr).toContain('1 batch for email 1 could not be read: ')
+    expect(r.stderr).toContain('Amdahl may still be writing it: run again with --resume later.')
+    const rows = read(io, 'leads-amdahl-sequence.csv').split('\r\n').slice(1)
+    const withEmail1 = rows.filter((l) => /Better|Written/.test(l))
+    expect(withEmail1.length).toBeGreaterThan(0)
+    expect(withEmail1.length).toBeLessThan(500)
+    expect(rows.filter((l) => l.includes('email 1 failed'))).toEqual([])
   })
 })
 
