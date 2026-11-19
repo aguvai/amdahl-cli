@@ -21,10 +21,13 @@
 // stdout. `--json` prints {ok, file, started, result}.
 
 import { amdahlCommand } from '../command-name'
+import { promptChangeLines } from '../changes'
 import { apiClient, call, resolveCredential, str, type Credential, type Ctx } from '../context'
 import { CliError, EXIT, usageError } from '../errors'
 import { readTextFile } from '../files'
 import { rememberRun } from '../history'
+import { askGuided, nextTimeLine, type GuidedAnswers } from '../prompt-guided'
+import { isCsvPath, recipientsFromCsv } from '../prompt-recipients'
 import { clip, field, paragraphs, record, records, wrap } from '../text'
 import { askingAllowed } from './feedback'
 import { CHANNELS, credentialOrSignIn, oneOf, readContext } from './optimize'
@@ -178,6 +181,9 @@ export function promptRunLines(run: Record<string, unknown>): string[] {
   const says = records(run.notes).map((n) => field(n.says)).filter(Boolean)
   for (const note of says) lines.push(...wrap(note))
 
+  const changes = outcome === 'improved' ? promptChangeLines(run) : []
+  if (changes.length > 0) lines.push('', ...changes)
+
   const rates = lineRates(original)
   if (rates.length > 0) {
     lines.push('', ...wrap(`Lines, over the ${outcome === 'graded' ? '' : 'held-out '}emails: ${rates.join(', ')}.`))
@@ -212,13 +218,15 @@ export function recipientsNeeded(err: unknown, sentRecipients: boolean): unknown
   return new CliError(err.code, message, err.exit, hint, err.detail, err.data)
 }
 
-/** The recipients file: 1 to 6 objects with a `recipient`, as the API takes them. */
+/** The recipients file: a CSV, or JSON of 1 to 6 objects with a `recipient`, as the API takes them. */
 function readRecipients(path: string, mode: string): unknown[] {
   const text = readTextFile(path)
+  const csv = isCsvPath(path)
   let parsed: unknown
   try {
-    parsed = JSON.parse(text)
+    parsed = csv ? recipientsFromCsv(path, text) : JSON.parse(text)
   } catch (err) {
+    if (err instanceof CliError) throw err
     throw usageError(`--recipients ${path} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`)
   }
   if (!Array.isArray(parsed)) throw usageError('--recipients must be a JSON array of {"recipient": {...}} objects.', 'Each recipient may have name, company, email, domain, linkedin_url and attributes; also recipient_notes and label.')
@@ -226,6 +234,7 @@ function readRecipients(path: string, mode: string): unknown[] {
   if (mode === 'improve' && parsed.length < RECIPIENTS.minForImprove) {
     throw usageError('Improving a prompt needs at least 2 recipients: the first half train it, the rest are held out.', 'Add one, or grade the prompt with --mode grade.')
   }
+  if (csv) return parsed
   parsed.forEach((item, i) => {
     if (!record(item) || !record(record(item)?.recipient) || Object.keys(record(record(item)?.recipient) ?? {}).length === 0) {
       throw usageError(`--recipients item ${i + 1} needs a "recipient" object with at least one of name, company, email, domain or linkedin_url.`)
@@ -288,10 +297,10 @@ function printRun(ctx: Ctx, file: string | undefined, started: Record<string, un
   return EXIT.ok
 }
 
-/** `amdahl prompt <file|-> [--mode improve|grade] [--recipients <file.json>] [--channel email|linkedin] [--context <file.json>] [--no-wait]`, or `--run <id>`. */
+/** `amdahl prompt <file|-> [--mode improve|grade] [--recipients <file.json|file.csv>] [--channel email|linkedin] [--context <file.json>] [--no-wait]`, `--run <id>`, or with no file at a terminal, three questions. */
 export async function prompt(ctx: Ctx, args: string[]): Promise<number> {
   const { io, out, flags } = ctx
-  const usage = `Usage: ${amdahlCommand('prompt <file|-> [--mode improve|grade] [--recipients <file.json>]')}`
+  const usage = `Usage: ${amdahlCommand('prompt <file|-> [--mode improve|grade] [--recipients <file.json|file.csv>]')}`
 
   // Read a run started earlier.
   const runId = str(flags.run)
@@ -308,7 +317,7 @@ export async function prompt(ctx: Ctx, args: string[]): Promise<number> {
   }
 
   if (args.length > 1) throw usageError('Give one prompt: a file, or - for standard input.', usage)
-  const mode = oneOf('mode', str(flags.mode), MODES) ?? 'improve'
+  let mode = oneOf('mode', str(flags.mode), MODES) ?? 'improve'
   const channel = oneOf('channel', str(flags.channel), CHANNELS)
   const body: Record<string, unknown> = {}
   if (str(flags.mode)) body.mode = mode
@@ -321,14 +330,20 @@ export async function prompt(ctx: Ctx, args: string[]): Promise<number> {
   let file = args[0]
   let text: string
   let credential: Credential | undefined
+  let guided: GuidedAnswers | undefined
+  const skip = { recipients: !!recipientsPath, mode: str(flags.mode) || undefined }
   if (file === undefined) {
     if (askingAllowed(ctx)) {
       credential = await credentialOrSignIn(ctx)
-      text = await io.readPaste('Paste the prompt, then press Enter on an empty line:')
+      const answers = await askGuided(ctx, skip)
+      if (!answers) return EXIT.ok
+      guided = answers
+      text = answers.prompt
       file = '-'
-      if (!text.trim()) {
-        out.info('Nothing pasted, so nothing was sent.')
-        return EXIT.ok
+      if (answers.recipients) body.recipients = answers.recipients
+      if (answers.mode) {
+        mode = answers.mode
+        body.mode = mode
       }
     } else if (io.stdinIsTTY) {
       throw usageError('Give a file with the prompt, or pipe the prompt on stdin.', usage)
@@ -363,9 +378,11 @@ export async function prompt(ctx: Ctx, args: string[]): Promise<number> {
   }
   if (flags['no-wait'] === true) {
     if (out.json) out.result({ ok: true, file, started })
-    else out.info(`Read it later:\n  ${amdahlCommand(`prompt --run ${id}`)}`)
+    else out.info(`Read it later:\n  ${amdahlCommand(`prompt --run ${id}`)}${guided ? `\n${nextTimeLine(guided, skip)}` : ''}`)
     return EXIT.ok
   }
   if (!out.json) out.info(`If you stop before it ends, read it later:\n  ${amdahlCommand(`prompt --run ${id}`)}`)
-  return printRun(ctx, file, started, await waitForRun(ctx, credential, id))
+  const code = printRun(ctx, file, started, await waitForRun(ctx, credential, id))
+  if (guided) out.info(nextTimeLine(guided, skip))
+  return code
 }

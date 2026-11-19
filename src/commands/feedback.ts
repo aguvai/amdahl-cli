@@ -39,7 +39,7 @@ export const FEEDBACK_EVIDENCE = ['did_it_myself', 'reported_to_me', 'inferred']
  * The `provider` values `messages.report_send` accepts, in the server's order: `SEND_PROVIDERS` in
  * amdahl-app `src/shared/providers/registry.generated.ts`. A provider added there belongs here too.
  */
-export const SEND_PROVIDERS = ['lemlist', 'instantly', 'outreach', 'salesloft', 'hubspot', 'salesforce', 'gmail', 'heyreach', 'apollo', 'smartlead', 'reply_io', 'lgm', 'woodpecker', 'linkedin_manual', 'other']
+export const SEND_PROVIDERS = ['lemlist', 'instantly', 'outreach', 'salesloft', 'hubspot', 'salesforce', 'gmail', 'heyreach', 'apollo', 'smartlead', 'reply_io', 'lgm', 'woodpecker', 'amplemarket', 'linkedin_manual', 'other']
 export const SEND_CHANNELS = ['email', 'linkedin_invite', 'linkedin_message', 'linkedin_inmail']
 /**
  * `amdahl optimize --channel` says `linkedin`; the server's report names the kind of LinkedIn

@@ -37,6 +37,29 @@ export const KNOWN_RUN_BODY = {
   created_at: '2026-11-12T08:00:00Z',
   omitted: [{ what: 'a second proof point', why: 'The context held one.' }],
 }
+/** The `changes` and `added_claims` a server that computes them answers with (MockOptions.whatChanged). */
+export const WHAT_CHANGED = {
+  changes: [
+    { before: 'We are the leading onboarding platform.', after: null, why: 'Nothing backs it.', why_cut: 'nothing in your calls backs it' },
+    { before: null, after: 'Helix cut provisioning tickets by 70% in one quarter.', why: 'Proof.', why_added: 'it gives proof from a team like theirs' },
+    { before: 'Quick note about pricing.', after: 'Quick note on pricing for Helix.', why: 'Names the company.' },
+    { before: 'Can we talk?', after: 'Worth 15 minutes?', why: 'Asks for a time.', why_cut: 'it did not say how long', why_added: 'it asks for 15 minutes' },
+  ],
+  added_claims: [
+    {
+      sentence: 'Helix cut provisioning tickets by 70% in one quarter.',
+      sources: [
+        { id: 's1', tag: 'call', text: 'We cut provisioning tickets by 70% after we moved onto the new platform and trained every support lead on it in the first quarter' },
+        { id: 's2', tag: null, text: 'Second source.' },
+      ],
+    },
+  ],
+}
+/** The `changes` of an improved prompt run (MockOptions.whatChanged). */
+export const PROMPT_CHANGES = [
+  { before: 'Write an email.', after: 'Write a first-touch email to a Head of Platform.', why_cut: 'it named no reader', why_added: 'it says who reads it' },
+  { before: null, after: 'Then ask for 15 minutes.', why_added: 'it ends on one ask' },
+]
 /** The run id of item `index` of any batch the mock ran. */
 export const batchRun = (index: number) => `99999999-9999-4999-8999-${String(index).padStart(12, '0')}`
 
@@ -84,6 +107,12 @@ export interface MockOptions {
   noConnections?: boolean
   /** Answer setup/status with an optimize blocker (and the quota used up for quota_exhausted). */
   blocker?: 'missing_scope' | 'role_too_low' | 'quota_exhausted'
+  /** The scopes /me/context answers and a research request needs `conversations:write` from (default: the usual set, and an API key can research). */
+  scopes?: string[]
+  /** Answer /me/context with a 500. */
+  failMeContext?: boolean
+  /** Refuse every research request with the server's "ran search instead" note, though /me/context lists `conversations:write`. */
+  researchRefused?: boolean
   /** The search/query result body (inside `data`); the default is two rows and a cited answer. */
   searchResult?: Record<string, unknown>
   /** Research reads that answer `running` before the job completes. */
@@ -108,7 +137,11 @@ export interface MockOptions {
    */
   /** `GET /search/suggestions` never answers (a hanging server). */
   suggestionsHang?: boolean
-  suggestions?: { for_you?: Record<string, unknown>[]; library?: Record<string, unknown>[]; generated_at?: string; setup_needed?: Record<string, unknown> }
+  suggestions?: { for_you?: Record<string, unknown>[]; library?: Record<string, unknown>[]; generated_at?: string; setup_needed?: Record<string, unknown>; hidden_recipe_ids?: string[] }
+  /** The first n suggestions reads answer `pending: true` with an empty For you (the server still working it out). */
+  suggestionsPendingReads?: number
+  /** A key's search without `route: "research"` is handed to research by the server: this is its `routing`, and the answer carries a `query_id`. */
+  routedResearch?: Record<string, unknown>
   /** setup/status's `free_usage` (a self-serve workspace on its free credit). */
   freeUsage?: Record<string, unknown>
   /** optimize_prompt refuses with this message (a 422), as the server does with no recipients on an empty workspace. */
@@ -136,6 +169,8 @@ export interface MockOptions {
   batchMessage?: string
   /** The one-line summary every batch item comes back with (default: `Tighter opener.`). */
   batchSummary?: string
+  /** The server computes `changes` and `added_claims`: optimize, batch items, the known run and an improved prompt run answer with {@link WHAT_CHANGED} and {@link PROMPT_CHANGES}. Unset: they are absent, as on an older server. */
+  whatChanged?: boolean
   /** A whole item's status and result by its index, when the default message does not do. */
   batchResults?: (item: Record<string, unknown>, index: number) => { status: string; result: Record<string, unknown> | null } | undefined
 }
@@ -167,6 +202,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
   // Sends already reported, by run and send key.
   const reports = new Map<string, number>()
   let researchReads = 0
+  let suggestionReads = 0
   let workspaceCreated = false
   let refusals = 0
   const codes = new Map<string, { challenge: string; redirectUri: string }>()
@@ -329,10 +365,11 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
       }
 
       if (path === '/api/platform/v1/me/context') {
+        if (options.failMeContext) return err(res, 500, 'internal_error')
         return json(res, 200, {
           user_id: USER,
           business_id: BIZ,
-          scopes: ['data:read', 'connections:read', 'messages:execute'],
+          scopes: options.scopes ?? ['data:read', 'connections:read', 'messages:execute'],
           auth_method: kind,
           email: 'dev@example.com',
           workspace: { id: BIZ, name: options.workspaceName ?? 'Acme', slug: 'acme' },
@@ -365,8 +402,22 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
         const input = JSON.parse(body) as { query?: string; route?: string }
         const problem = searchProblem(input, options.suggestions ? (options.suggestions.library ?? SUGGESTED_LIBRARY).map((r) => String(r.id)) : null)
         if (problem) return json(res, 400, { data: { success: false, error: { code: 'invalid_argument', message: problem } } })
+        const canResearch = kind === 'api_key' && !options.researchRefused && (options.scopes ? options.scopes.includes('conversations:write') : true)
+        if (options.routedResearch && input.route !== 'research' && canResearch) {
+          return json(res, 200, {
+            data: {
+              success: true,
+              mode_ran: 'research',
+              results: [],
+              timing: { total_ms: 5 },
+              query_id: '77777777-7777-4777-8777-777777777777',
+              routing: options.routedResearch,
+              research: { research_id: '66666666-6666-4666-8666-666666666666', chat_id: 'chat1', status: 'running', poll: 'Poll GET /research/:id' },
+            },
+          })
+        }
         if (input.route === 'research') {
-          if (kind === 'api_key') {
+          if (canResearch) {
             return json(res, 200, {
               data: {
                 success: true,
@@ -379,7 +430,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
             })
           }
           return json(res, 200, {
-            data: options.searchResult ?? {
+            data: (options.researchRefused && options.searchResult ? { ...options.searchResult, notes: ['Starting a research job for this ask needs a credential that can start one (conversations:write); ran search instead.'] } : null) ?? options.searchResult ?? {
               success: true,
               mode_ran: 'fuzzy',
               results: [{ id: 'r1', title: 'Discovery call', speaker: 'Dana', occurred_at: '2026-10-01T10:00:00Z', text: 'Pricing came up twice.' }],
@@ -486,7 +537,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
                   ? options.batchResults(item, index)?.result
                   : options.batchFailures?.includes(index)
                   ? { ok: false, reason: 'optimizer_error', detail: 'It failed.' }
-                  : { ok: true, message: options.batchMessage ?? `better: ${String(item.message)}`, summary: options.batchSummary ?? 'Tighter opener.', what_changed: 'Wrote this message from the context you sent.', run_id: batchRun(index), unchanged: false },
+                  : { ok: true, message: options.batchMessage ?? `better: ${String(item.message)}`, summary: options.batchSummary ?? 'Tighter opener.', what_changed: 'Wrote this message from the context you sent.', run_id: batchRun(index), unchanged: false, ...(options.whatChanged ? WHAT_CHANGED : {}) },
             })),
             next_cursor: last && last.index < entry.items.length - 1 ? String(last.index) : null,
           },
@@ -580,7 +631,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
           return json(res, 200, { data: options.gradeResult ?? gradeBody(input.evidence === 'workspace') })
         }
         return json(res, 200, {
-          data: options.optimizeResult ?? { ok: true, message: `better: ${input.message}`, summary: 'Tighter opener.', unchanged: false, run_id: 'r1' },
+          data: options.optimizeResult ?? { ok: true, message: `better: ${input.message}`, summary: 'Tighter opener.', unchanged: false, run_id: 'r1', ...(options.whatChanged ? WHAT_CHANGED : {}) },
         })
       }
 
@@ -604,7 +655,8 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
         if (!entry) return err(res, 404, 'not_found', 'No prompt run with this id from you in this workspace.')
         entry.polls++
         if (entry.polls <= (options.promptPolls ?? 1)) return json(res, 200, { data: { run_id: promptRead[1], status: 'running', phase: entry.polls === 1 ? 'writing_emails' : 'grading' } })
-        return json(res, 200, { data: { run_id: promptRead[1], status: 'complete', ...(options.promptResult ? options.promptResult(entry.mode) : promptBody(entry.mode)) } })
+        const body = options.promptResult ? options.promptResult(entry.mode) : promptBody(entry.mode)
+        return json(res, 200, { data: { run_id: promptRead[1], status: 'complete', ...body, ...(options.whatChanged && body.outcome === 'improved' ? { changes: PROMPT_CHANGES } : {}) } })
       }
 
       // messages.get_run: one past run, read by its id by the person who made it.
@@ -619,6 +671,8 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
       if (path === '/api/platform/v1/search/suggestions' && req.method === 'GET') {
         if (options.suggestionsHang) return
         if (!options.suggestions) return err(res, 404, 'not_found', 'No such route.')
+        suggestionReads++
+        if (suggestionReads <= (options.suggestionsPendingReads ?? 0)) return json(res, 200, { data: { for_you: [], library: SUGGESTED_LIBRARY, generated_at: '2026-11-13T22:40:02.728Z', pending: true } })
         return json(res, 200, { data: { for_you: [], library: SUGGESTED_LIBRARY, generated_at: '2026-11-13T22:40:02.728Z', ...options.suggestions } })
       }
       if (path === '/api/platform/v1/search/overview' && req.method === 'GET') {

@@ -14,6 +14,11 @@
 // server runs the search instead and says so; the CLI then adds one line on
 // the key that can (`amdahl keys create --preset agent`).
 //
+// The server decides when a question needs research. When it starts a job
+// itself, one line says why (search-offer.ts). When it only offers one, a
+// person at a terminal with a key that can research is asked once, and a yes
+// asks the question again as research, linked to the answer by its `query_id`.
+//
 // A workspace with nothing connected answers with `setup_needed`: its
 // message and link print, then the command that opens the add page.
 //
@@ -30,6 +35,7 @@ import { blockLines } from '../blocks'
 import { clip, count, cutAtWord, day, field, paragraphs, plainMarkdown, record, records, wrap } from '../text'
 import { FILL_MAX } from '../recipes-data'
 import { connectLine } from './connections'
+import { offerResearch, routedLine } from './search-offer'
 import { FILL_FLAGS, loadLibrary, recipeById, recipeQuestion } from './recipes'
 
 const PLATFORM = '/api/platform/v1'
@@ -215,7 +221,8 @@ export function searchLines(result: Record<string, unknown>, question = '', rese
     if (said) lines.push(...wrap(said))
     if (freshness) lines.push(...wrap(freshness))
     if (!said && !freshness) lines.push('No matches.')
-    if (!researchAsked && WHY_OR_COMPARE.test(question)) lines.push('', nextStepLine())
+    // When the server offers research itself, its offer is the next step (search-offer.ts), so this one is not said again.
+    if (!researchAsked && WHY_OR_COMPARE.test(question) && !record(result.research_offer)) lines.push('', nextStepLine())
   }
   const gap = field(record(result.statistical_gap)?.message)
   if (gap) lines.push(...wrap(gap))
@@ -342,12 +349,24 @@ export async function search(ctx: Ctx, args: string[]): Promise<number> {
   const client = apiClient(ctx, credential)
   if (!out.json && ctx.io.stderrIsTTY) out.info('Searching...')
   const result = await call(() => client.request<Record<string, unknown>>(`${PLATFORM}/search/query`, { method: 'POST', body }))
+  return showAnswer(ctx, credential, body, question, result, ctx.flags.research === true)
+}
+
+/**
+ * Print one search answer: a research job it started (waited on), or the rows and answer. When the server only
+ * offered research, a person is asked once, and a yes asks the same question again as research, linked to
+ * this answer by its `query_id` (`from_query_id`), and prints that. `researchAsked`: research was asked for.
+ */
+async function showAnswer(ctx: Ctx, credential: Credential, body: Record<string, unknown>, question: string, result: Record<string, unknown>, researchAsked: boolean): Promise<number> {
+  const { out } = ctx
   const notes = (Array.isArray(result.notes) ? result.notes : []).map(field).filter(Boolean)
   const setup = record(result.setup_needed)
   const handoff = record(result.research)
 
   // A fresh handle carries no answer, even one that says `complete` (a cached job): read the job.
   if (handoff && field(handoff.research_id) && !record(handoff.answer)) {
+    const routed = routedLine(result)
+    if (!out.json && routed) out.info(routed)
     if (!out.json && field(handoff.status) !== 'complete') {
       out.info(`Amdahl started research on it. This can take a few minutes.\nResearch id: ${field(handoff.research_id)}\n${researchLaterLine(field(handoff.research_id))}`)
     }
@@ -376,7 +395,6 @@ export async function search(ctx: Ctx, args: string[]): Promise<number> {
     out.result({ ...result, ok: !failed })
     return failed ? EXIT.general : EXIT.ok
   }
-  const researchAsked = ctx.flags.research === true
   const researchId = field(handoff?.research_id)
   if (cut && rows.length === 0 && !answered) {
     out.info(outOfTimeLines(0, researchAsked, researchId).join('\n'))
@@ -395,9 +413,22 @@ export async function search(ctx: Ctx, args: string[]): Promise<number> {
     const refused = notes.find((n) => /ran search instead/i.test(n))
     if (refused) out.info(wrap(refused).join('\n'))
   }
-  out.result({}, searchLines(result, question, ctx.flags.research === true).join('\n'))
-  await askRating(ctx, credential, { id: field(result.query_id), surface: 'search' })
-  return EXIT.ok
+  out.result({}, searchLines(result, question, researchAsked).join('\n'))
+  if (researchAsked || !(await offerResearch(ctx, credential, result, question, researchKeyLine()))) {
+    await askRating(ctx, credential, { id: field(result.query_id), surface: 'search' })
+    return EXIT.ok
+  }
+  // A `query_id` links the research to the answer it follows; without one from this question, none is sent.
+  const queryId = field(result.query_id)
+  const research = { ...body, route: 'research', ...(queryId ? { from_query_id: queryId } : {}) }
+  if (!out.json && ctx.io.stderrIsTTY) out.info('Searching...')
+  const again = await call(() => apiClient(ctx, credential).request<Record<string, unknown>>(`${PLATFORM}/search/query`, { method: 'POST', body: research }))
+  // The server refused the handoff: the answer was already shown, so only the key that can research is said.
+  if (!record(again.research) && refusedForScope((Array.isArray(again.notes) ? again.notes : []).map(field).filter(Boolean))) {
+    out.info(researchKeyLine())
+    return EXIT.ok
+  }
+  return showAnswer(ctx, credential, research, question, again, true)
 }
 
 /**

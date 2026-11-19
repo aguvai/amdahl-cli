@@ -301,7 +301,8 @@ What you can do:
                                  client it finds, and asks nothing (also:
                                  amdahl setup)
   amdahl optimize draft.md       Rewrite an outbound email or LinkedIn message
-                                 (with no file, at a terminal, paste it)
+                                 and say what changed and why (with no file,
+                                 at a terminal, paste it)
   amdahl optimize --list drafts.csv
                                  Rewrite a whole list in one batch; results go
                                  to drafts.optimized.csv
@@ -311,7 +312,8 @@ What you can do:
                                  Smartlead, lemlist, HeyReach, Apollo and more)
   amdahl grade draft.md          Grade a message: score and the lines behind
   amdahl prompt prompt.md        Grade or improve a reusable prompt by the
-                                 emails it writes
+                                 emails it writes (with no file, at a
+                                 terminal, three short steps)
   amdahl search "<question>"     Ask about your customers, calls and deals
   amdahl recipes                 The console's questions (amdahl search
                                  --recipe <id> runs one)
@@ -353,20 +355,22 @@ Commands:
                        as a CSV that tool imports (<list>-<tool>.csv), and say
                        how to import it. Tools: instantly, smartlead, lemlist,
                        heyreach, reply_io, apollo, outreach, salesloft,
-                       hubspot, lgm, woodpecker, other (any tool that imports
-                       a CSV). lemlist, reply_io and other take both channels,
-                       so add --channel email|linkedin.
+                       hubspot, lgm, woodpecker, amplemarket, other (any tool
+                       that imports a CSV). lemlist, reply_io and other take
+                       both channels, so add --channel email|linkedin.
   grade <file|-> [--channel email|linkedin] [--evidence off|workspace]
            [--context <file.json>]
            Grade a draft and write nothing. The score always comes with its
            five lines. No line evaluated reads "Not graded", never 0. A grade
            does not predict replies. --json prints {ok, file, result}: the
            grade is .result.grade.
-  prompt <file|-> [--mode improve|grade] [--recipients <file.json>]
+  prompt <file|-> [--mode improve|grade] [--recipients <file.json|file.csv>]
            [--channel email|linkedin] [--context <file.json>] [--no-wait]
   prompt --run <id> [--no-wait]
            Grade or improve a reusable prompt by the emails it writes. A run
            takes minutes: its id is printed, --run <id> reads it later.
+  prompt   With no file, at a terminal, it asks in three steps: the prompt,
+           who to test it on, and Improve or Grade.
   runs [--limit <n>]                         Your latest runs, on this computer
   run <run-id>                               One run: your draft, then Amdahl's
   data [--surface interactions|deals|deal_qualification]
@@ -378,7 +382,9 @@ Commands:
   search --research-id <id>
            --research  ask for a research job: a deeper, cited answer (needs
                        a Customer agent key, amdahl keys create --preset
-                       agent; a sign-in gets the search answer)
+                       agent; a sign-in gets the search answer). Search starts
+                       research itself when a question needs it, and offers
+                       it when it could help
            --recipe    one of the console's questions (amdahl recipes); its
                        fill-in is a flag, like --account Acme
            --research-id  read a research job that started earlier; search
@@ -403,8 +409,8 @@ Commands:
            both (a recipient is --recipient or --recipient-key-hash, not both).
            --provider: lemlist, instantly, outreach, salesloft, hubspot,
                        salesforce, gmail, heyreach, apollo, smartlead,
-                       reply_io, lgm, woodpecker, linkedin_manual, other
-                       (any sender not listed)
+                       reply_io, lgm, woodpecker, amplemarket,
+                       linkedin_manual, other (any sender not listed)
            --channel:  email, linkedin (= linkedin_message), linkedin_invite,
                        linkedin_message, linkedin_inmail
            --sent-as edited needs --sent-text.
