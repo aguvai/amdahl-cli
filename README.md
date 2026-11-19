@@ -903,6 +903,46 @@ With `--json` it prints one document: `ok`, `mode` (`improve` or `write`),
 when the run stopped), and, when a file was written, `file` and `saved` (how
 many emails it holds).
 
+### A sequence for each person in a lead list
+
+```sh
+amdahl sequence emails.md --leads leads.csv
+amdahl sequence --write "Book a first meeting." --leads leads.csv --for instantly
+```
+
+`--leads` writes or improves the whole sequence for each person in the list
+(up to 500; the list needs an email, LinkedIn, or name and company column).
+Email 1 goes as one batch for everyone (`POST /messages/optimize/batch`), then
+email 2 as one batch for everyone whose email 1 came back, and so on. Each
+person's email 2 is written as a follow-up to their own email 1, never another
+person's. A person whose email fails stops there.
+
+Each fill-in field is matched to a column of the list, so `{{first_name}}`
+finds "First Name". At a terminal, Amdahl asks only about a real problem: a
+field with no column, or a column that is empty for some people. A script sets
+the same choices with flags, repeated as needed:
+
+- `--match company="Company Name"` fills the field from that column.
+- `--fallback first_name=there` is the text for people whose cell is empty
+  (`first_name` starts as "there").
+- `--same company="your team"` puts the same text in for everyone.
+- `--drop icebreaker` leaves the field out.
+
+A field with no column and no flag is refused before anything is sent.
+
+`--write` with `--leads` writes one sample person first at a terminal, shows
+their emails, and asks `Write for the other 49 people? [Y/n]`. A yes keeps the
+sample and writes the rest. An improved sequence asks once before it starts,
+with the number of runs. An agent, CI, a pipe or `--json` is not asked.
+
+The results go to `<list>-amdahl-sequence.csv`: every column of the list, then
+`amdahl_subject` and `amdahl_message` for email 1, `amdahl_subject_2` and
+`amdahl_message_2` for email 2 and so on (a subject column only for an email
+with its own subject), then `amdahl_status`. `--for <tool>` also writes the
+import file for that sequencer, with each email's columns and the steps to map
+them. `--resume` picks each person up from their first unwritten email, from
+the results file. `--force` starts again.
+
 The recipes behind it are in the cookbook:
 [improve a sequence](https://github.com/amdahlco/amdahl-cookbook/blob/main/prompts/agent-platform/improve-a-sequence.md)
 and
