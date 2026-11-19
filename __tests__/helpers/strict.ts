@@ -28,9 +28,9 @@ const CONTEXT_LIMITS: Record<string, { maxItems: number; maxChars: number }> = {
 }
 
 /** The refusals of a `context` block (messageOptimizer/context.ts): unknown keys, counts and lengths. `triggers` is not a key here. */
-export function contextProblems(at: string, context: unknown): string[] {
+export function contextProblems(at: string, context: unknown, extraKeys: readonly string[] = []): string[] {
   if (!isObject(context)) return [`${at}: Expected object`]
-  const errors = unknownKeys(at, context, CONTEXT_KEYS)
+  const errors = unknownKeys(at, context, [...CONTEXT_KEYS, ...extraKeys])
   for (const [key, limit] of Object.entries(CONTEXT_LIMITS)) {
     const list = context[key]
     if (list === undefined) continue
@@ -46,6 +46,44 @@ export function contextProblems(at: string, context: unknown): string[] {
     })
   }
   return errors
+}
+
+// messageOptimizer/relationship.ts: priorTouchesSchema (2026-11-19).
+const PRIOR_TOUCH_CHANNELS = ['email', 'linkedin', 'call', 'meeting', 'other']
+const PRIOR_TOUCH_KEYS = ['on', 'channel', 'summary']
+
+/** The refusals of `context.prior_touches`: at most 10 strict objects of a day, an optional channel and a summary of 1 to 500 characters once trimmed. */
+function priorTouchProblems(at: string, touches: unknown): string[] {
+  if (!Array.isArray(touches)) return [`${at}: Expected array`]
+  const errors = touches.length > 10 ? [`${at}: Array must contain at most 10 element(s)`] : []
+  touches.forEach((touch, j) => {
+    const here = `${at}[${j}]`
+    if (!isObject(touch)) return void errors.push(`${here}: Expected object`)
+    errors.push(...unknownKeys(here, touch, PRIOR_TOUCH_KEYS))
+    if (typeof touch.on !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(touch.on)) errors.push(`${here}.on: must be a day, YYYY-MM-DD`)
+    if (touch.channel !== undefined && !PRIOR_TOUCH_CHANNELS.includes(String(touch.channel))) errors.push(`${here}.channel: Invalid enum value. Expected ${PRIOR_TOUCH_CHANNELS.map((c) => `'${c}'`).join(' | ')}, received '${String(touch.channel)}'`)
+    const summary = typeof touch.summary === 'string' ? touch.summary.trim() : null
+    if (summary === null) errors.push(`${here}.summary: Required`)
+    else if (summary.length < 1) errors.push(`${here}.summary: String must contain at least 1 character(s)`)
+    else if (summary.length > 500) errors.push(`${here}.summary: String must contain at most 500 character(s)`)
+  })
+  return errors
+}
+
+/** The refusals of the `context` of messages.optimize (optimizerContextSchema): the batch's keys, and `prior_touches`, `stage`, `offer`, `thread`, `triggers`. */
+export function optimizeContextProblems(context: unknown): string[] {
+  const errors = contextProblems('$.context', context, ['triggers', 'offer', 'thread', 'stage', 'prior_touches'])
+  if (isObject(context) && context.prior_touches !== undefined) errors.push(...priorTouchProblems('$.context.prior_touches', context.prior_touches))
+  return errors
+}
+
+/** True when `context` holds something a message can be written from (contextFirst.hasWritableContext): facts, rules, voice examples or earlier touches. */
+function writable(context: unknown): boolean {
+  if (!isObject(context)) return false
+  return ['facts', 'rules', 'voice_examples', 'prior_touches'].some((key) => {
+    const list = context[key]
+    return Array.isArray(list) && list.some((entry) => (typeof entry === 'string' ? entry.trim() : entry) !== '')
+  })
 }
 
 /** The refusals of a batch body, as paths (`$.items[3].channel: ...`), at most 20. */
@@ -228,6 +266,11 @@ export function optimizeProblems(input: unknown): string[] {
     if (input[key] !== undefined && !allowed.includes(String(input[key]))) errors.push(`$.${key}: Invalid enum value. Expected ${allowed.map((a) => `'${a}'`).join(' | ')}, received '${String(input[key])}'`)
   }
   if (input.mode !== undefined && input.mode !== 'improve' && input.mode !== 'grade') return [...errors, '$.mode: must be one of improve, grade']
+  if (input.context !== undefined) errors.push(...optimizeContextProblems(input.context))
+  // contextFirst.ts: an empty message is accepted when the context has something to write from; constraints alone are not.
+  if (input.mode !== 'grade' && !(typeof input.message === 'string' && input.message.trim()) && !writable(input.context)) {
+    errors.push('$.context: send what you know about the recipient. context.facts is the message; context.rules is what it must and must not do.')
+  }
   if (input.mode === 'grade') {
     if (typeof input.message !== 'string' || !input.message.trim()) errors.push('$.message: mode grade grades a draft, so message is required')
     if (input.include_tries === true) errors.push('$.include_tries: mode grade writes no versions to return')
