@@ -9,7 +9,7 @@
 // fields pass through and nothing is added (search.ts).
 
 import { amdahlCommand } from '../command-name'
-import type { Credential, Ctx } from '../context'
+import { apiClient, type Credential, type Ctx } from '../context'
 import { canAsk } from '../terminal'
 import { field, record, wrap } from '../text'
 import { shellWord } from './recipes'
@@ -52,6 +52,27 @@ export function canStartResearch(credential: Credential): boolean {
   return credential.source === 'flag' || credential.source === 'env:AMDAHL_KEY' || credential.source === 'env:AMDAHL_API_KEY'
 }
 
+/** How long the scope read may take before the offer falls back to the key line. */
+const SCOPE_CHECK_MS = 4000
+
+/**
+ * Whether this API key holds `conversations:write`, which starts research: a key made with
+ * `--preset optimize`, or a read-only one, does not. Never rejects: a read that fails or
+ * runs past the cap says no, so the key line is shown and nothing is asked.
+ */
+async function keyCanResearch(ctx: Ctx, credential: Credential): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined
+  const cap = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), SCOPE_CHECK_MS)
+    timer.unref?.()
+  })
+  const read = apiClient(ctx, credential)
+    .cli.whoami()
+    .then((me) => Array.isArray(me.scopes) && me.scopes.includes('conversations:write'))
+    .catch(() => false)
+  return Promise.race([read, cap]).finally(() => clearTimeout(timer))
+}
+
 /** The longest command line printed for a question: a longer one is told to repeat the search with --research instead. */
 const COMMAND_MAX = 300
 
@@ -63,9 +84,10 @@ export function researchCommandLine(question: string): string {
 
 /**
  * Say what the server offered after a search, and return whether to start
- * research now. Only a person at a terminal with a key that can research is
- * asked (`Research it? [y/N]`); everyone else gets lines. Nothing is said when
- * the server made no offer.
+ * research now. Only a person at a terminal with a key that holds
+ * `conversations:write` is asked (`Research it? [y/N]`); everyone else gets
+ * lines, and the scopes are read only when a question is about to be asked.
+ * Nothing is said when the server made no offer.
  *
  * @param keyLine what a sign-in is told it needs (search.ts `researchKeyLine`).
  */
@@ -79,6 +101,10 @@ export async function offerResearch(ctx: Ctx, credential: Credential, result: Re
   }
   if (!canAsk(ctx)) {
     ctx.out.info([...wrap(reason), researchCommandLine(question)].join('\n'))
+    return false
+  }
+  if (!(await keyCanResearch(ctx, credential))) {
+    ctx.out.info([...wrap(reason), keyLine].join('\n'))
     return false
   }
   const answer = (await ctx.io.prompt(`${reason} Research it? [y/N] `)).trim().toLowerCase()

@@ -82,6 +82,12 @@ export interface MockOptions {
   noConnections?: boolean
   /** Answer setup/status with an optimize blocker (and the quota used up for quota_exhausted). */
   blocker?: 'missing_scope' | 'role_too_low' | 'quota_exhausted'
+  /** The scopes /me/context answers and a research request needs `conversations:write` from (default: the usual set, and an API key can research). */
+  scopes?: string[]
+  /** Answer /me/context with a 500. */
+  failMeContext?: boolean
+  /** Refuse every research request with the server's "ran search instead" note, though /me/context lists `conversations:write`. */
+  researchRefused?: boolean
   /** The search/query result body (inside `data`); the default is two rows and a cited answer. */
   searchResult?: Record<string, unknown>
   /** Research reads that answer `running` before the job completes. */
@@ -332,10 +338,11 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
       }
 
       if (path === '/api/platform/v1/me/context') {
+        if (options.failMeContext) return err(res, 500, 'internal_error')
         return json(res, 200, {
           user_id: USER,
           business_id: BIZ,
-          scopes: ['data:read', 'connections:read', 'messages:execute'],
+          scopes: options.scopes ?? ['data:read', 'connections:read', 'messages:execute'],
           auth_method: kind,
           email: 'dev@example.com',
           workspace: { id: BIZ, name: options.workspaceName ?? 'Acme', slug: 'acme' },
@@ -368,7 +375,8 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
         const input = JSON.parse(body) as { query?: string; route?: string }
         const problem = searchProblem(input, options.suggestions ? (options.suggestions.library ?? SUGGESTED_LIBRARY).map((r) => String(r.id)) : null)
         if (problem) return json(res, 400, { data: { success: false, error: { code: 'invalid_argument', message: problem } } })
-        if (options.routedResearch && input.route !== 'research' && kind === 'api_key') {
+        const canResearch = kind === 'api_key' && !options.researchRefused && (options.scopes ? options.scopes.includes('conversations:write') : true)
+        if (options.routedResearch && input.route !== 'research' && canResearch) {
           return json(res, 200, {
             data: {
               success: true,
@@ -382,7 +390,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
           })
         }
         if (input.route === 'research') {
-          if (kind === 'api_key') {
+          if (canResearch) {
             return json(res, 200, {
               data: {
                 success: true,
@@ -395,7 +403,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
             })
           }
           return json(res, 200, {
-            data: options.searchResult ?? {
+            data: (options.researchRefused && options.searchResult ? { ...options.searchResult, notes: ['Starting a research job for this ask needs a credential that can start one (conversations:write); ran search instead.'] } : null) ?? options.searchResult ?? {
               success: true,
               mode_ran: 'fuzzy',
               results: [{ id: 'r1', title: 'Discovery call', speaker: 'Dana', occurred_at: '2026-10-01T10:00:00Z', text: 'Pricing came up twice.' }],

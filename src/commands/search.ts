@@ -417,7 +417,13 @@ async function showAnswer(ctx: Ctx, credential: Credential, body: Record<string,
   // A `query_id` links the research to the answer it follows; without one from this question, none is sent.
   const queryId = field(result.query_id)
   const research = { ...body, route: 'research', ...(queryId ? { from_query_id: queryId } : {}) }
+  if (!out.json && ctx.io.stderrIsTTY) out.info('Searching...')
   const again = await call(() => apiClient(ctx, credential).request<Record<string, unknown>>(`${PLATFORM}/search/query`, { method: 'POST', body: research }))
+  // The server refused the handoff: the answer was already shown, so only the key that can research is said.
+  if (!record(again.research) && refusedForScope((Array.isArray(again.notes) ? again.notes : []).map(field).filter(Boolean))) {
+    out.info(researchKeyLine())
+    return EXIT.ok
+  }
   return showAnswer(ctx, credential, research, question, again, true)
 }
 

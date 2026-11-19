@@ -31,8 +31,13 @@ const offered = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 })
 
+/** The scopes of a Customer agent key (`--preset agent`): it can start research. */
+const AGENT_SCOPES = ['data:read', 'connections:read', 'messages:execute', 'conversations:write']
+/** The scopes of `--preset optimize` (the server's `mcp_optimize`): search and optimize, no research. */
+const OPTIMIZE_SCOPES = ['data:read', 'connections:read', 'messages:execute']
+
 async function withKey(options: Parameters<typeof startMockServer>[0] = {}, atTerminal = false): Promise<FakeIo> {
-  server = await startMockServer(options)
+  server = await startMockServer({ scopes: AGENT_SCOPES, ...options })
   const io = fakeIo({ AMDAHL_API_URL: server.url, AMDAHL_KEY: API_KEY })
   io.stdoutIsTTY = atTerminal
   return io
@@ -129,6 +134,58 @@ describe('the research offer', () => {
     expect(r.code).toBe(0)
     expect(io.prompts).toEqual([])
     expect(posts()).toEqual([{ query: 'why do deals die', answer: true, route: 'research' }])
+  })
+
+  it('an optimize-only key is not asked: it gets the reason and the key line, and sends one search', async () => {
+    const io = await withKey({ searchResult: offered(), scopes: OPTIMIZE_SCOPES }, true)
+    const r = await cli(io, 'search', 'why do deals die')
+    expect(r.code).toBe(0)
+    expect(io.prompts).toEqual([])
+    expect(r.stderr).toBe(`${CAUSE_OFFER}\nResearch needs a Customer agent key: amdahl keys create --name research --preset agent\n`)
+    expect(posts()).toHaveLength(1)
+    expect(reads('/me/context')).toHaveLength(1)
+  })
+
+  it('a failed scope read falls back to the key line and asks nothing', async () => {
+    const io = await withKey({ searchResult: offered(), failMeContext: true }, true)
+    const r = await cli(io, 'search', 'why do deals die')
+    expect(r.code).toBe(0)
+    expect(io.prompts).toEqual([])
+    expect(r.stderr).toBe(`${CAUSE_OFFER}\nResearch needs a Customer agent key: amdahl keys create --name research --preset agent\n`)
+    expect(posts()).toHaveLength(1)
+  })
+
+  it('reads no scopes when nothing is asked: no offer, --json, or a script', async () => {
+    const none = await withKey({}, true)
+    await cli(none, 'search', 'why do deals die')
+    await server!.close()
+    const json = await withKey({ searchResult: offered() }, true)
+    await cli(json, 'search', 'why do deals die', '--json')
+    expect(reads('/me/context')).toHaveLength(0)
+    await server!.close()
+    const piped = await withKey({ searchResult: offered() }, false)
+    await cli(piped, 'search', 'why do deals die')
+    expect(reads('/me/context')).toHaveLength(0)
+  })
+
+  it('says Searching... before the research request a yes starts', async () => {
+    const io = await withKey({ searchResult: offered() }, true)
+    io.stderrIsTTY = true
+    io.answers = ['y']
+    const r = await cli(io, 'search', 'why do deals die')
+    expect(r.code).toBe(0)
+    expect(r.stderr.startsWith('Searching...\nSearching...\nAmdahl started research on it.')).toBe(true)
+    expect(posts()).toHaveLength(2)
+  })
+
+  it('a refused handoff after a yes prints only the key line, not the answer again', async () => {
+    const io = await withKey({ searchResult: offered(), researchRefused: true }, true)
+    io.answers = ['y']
+    const r = await cli(io, 'search', 'why do deals die')
+    expect(r.code).toBe(0)
+    expect(posts()).toHaveLength(2)
+    expect(r.stdout.match(/Buyers raised pricing/g)).toHaveLength(1)
+    expect(r.stderr).toBe('Research needs a Customer agent key: amdahl keys create --name research --preset agent\n')
   })
 
   it('a sign-in is not asked: one line names the key that can research', async () => {
