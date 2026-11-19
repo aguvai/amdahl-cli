@@ -10,12 +10,13 @@
 //
 // Every email is checked before the first request, so a typo costs nothing.
 // The emails print one at a time as each comes back (the text on stdout, what
-// Amdahl changed on stderr). A file is written only with `--csv`. An agent, CI,
-// a pipe, `--json` or AMDAHL_NO_PROMPT=1 is never asked a question. `--json`
+// Amdahl changed on stderr). A file is written only with `--csv`: all the
+// emails, or, when the run stopped, the ones that came back. An agent, CI, a
+// pipe, `--json` or AMDAHL_NO_PROMPT=1 is never asked a question. `--json`
 // prints one document: see jsonDocument in sequence-run.ts.
 
-import { existsSync, writeFileSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { existsSync, statSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
 import { amdahlCommand } from '../command-name'
 import { resolveCredential, str, type Credential, type Ctx } from '../context'
 import { EXIT, usageError } from '../errors'
@@ -141,6 +142,28 @@ function csvTarget(ctx: Ctx, file: string | null): string | null {
   return file && file !== '-' ? join(dirname(file), sequenceFileName(basename(file))) : join(ctx.io.cwd, sequenceFileName(null))
 }
 
+/** True when two paths name the same file: the same resolved path, or the same file on disk (a link, or a different case). */
+function sameFile(cwd: string, a: string, b: string): boolean {
+  if (resolve(cwd, a) === resolve(cwd, b)) return true
+  try {
+    const x = statSync(resolve(cwd, a))
+    const y = statSync(resolve(cwd, b))
+    return x.ino !== 0 && x.ino === y.ino && x.dev === y.dev
+  } catch {
+    return false
+  }
+}
+
+/** Refuse a `--csv` that would replace one of the files the run reads, or that has no emails to go with it. */
+function checkCsvTarget(ctx: Ctx, file: string | undefined, writing: boolean): void {
+  const flag = ctx.flags.csv
+  if (typeof flag !== 'string' || !flag) return
+  if (file === undefined && !writing) throw usageError(`--csv ${flag} says where to save, but there are no emails to improve.`, USAGE)
+  const inputs = [file, str(ctx.flags.plan), str(ctx.flags.context)]
+  const clash = inputs.find((p) => p && p !== '-' && sameFile(ctx.io.cwd, flag, p))
+  if (clash) throw usageError(`--csv would replace your input file ${clash}. Name another file, or leave the name out.`)
+}
+
 /** Refuse a file that exists, unless `--force`. Checked before anything is sent. */
 function assertFree(path: string, force: boolean): void {
   if (!force && existsSync(path)) throw usageError(`${path} already exists.`, 'Move it, or add --force to replace it.')
@@ -172,6 +195,7 @@ export async function sequence(ctx: Ctx, args: string[]): Promise<number> {
   if (writeFlag === undefined && (flags.emails !== undefined || flags.plan !== undefined)) throw usageError('--emails and --plan go with --write "<goal>".')
   if (flags.force === true && typeof flags.csv !== 'string') throw usageError('--force goes with --csv.')
   const bare = file === undefined && writeFlag === undefined
+  checkCsvTarget(ctx, file, writeFlag !== undefined)
   // An agent, CI, a pipe and --json cannot be asked: they get the usage.
   if (bare && !(atTerminal(ctx) && !out.json)) throw usageError('Give a file of emails, or a goal to write them from.', USAGE)
 
@@ -205,11 +229,16 @@ export async function sequence(ctx: Ctx, args: string[]): Promise<number> {
     if (failed) out.info(`${failureLine(failed, emails.length, plan !== null)}${failed.hint ? `\n${failed.hint}` : ''}`)
   }
   let saved: string | null = null
-  if (!failed && target) {
+  const wrote = outcome.done.length
+  if (target && wrote > 0) {
     writeCsv(target, sequenceCsv(outcome.done.map((d) => d.final)), flags.force === true)
     saved = target
-    if (!out.json) out.result({}, `Saved: ${target}`)
-  } else if (!failed && !out.json && atTerminal(ctx)) out.info(csvTip(file ?? null, plan !== null))
-  if (out.json) out.result(jsonDocument(job, outcome, saved))
+    if (!out.json) {
+      if (!failed) out.result({}, `Saved: ${target}`)
+      else out.info(`Saved ${wrote === 1 ? 'email 1' : `emails 1 to ${wrote}`} only: ${target}`)
+    }
+  } else if (target && failed && !out.json) out.info(`Nothing was saved to ${target}.`)
+  else if (!failed && !target && !out.json && atTerminal(ctx)) out.info(csvTip(file ?? null, plan !== null))
+  if (out.json) out.result(jsonDocument(job, outcome, saved, wrote))
   return outcome.exit
 }

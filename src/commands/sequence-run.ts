@@ -8,7 +8,9 @@
 // plan's two rules and the touches are the context. A failure (`ok: false`, or
 // an error) stops the run: the emails before it are already printed, and the
 // later ones are not sent. The emails print as each one comes back: the text
-// on stdout, what changed on stderr. Nothing is written to disk here.
+// on stdout, what changed on stderr. An email refused as rate limited is tried
+// once more after the wait the server names (at most 60 s). Nothing is written
+// to disk here.
 
 import { changeLines } from '../changes'
 import { toCliError, type Credential, type Ctx } from '../context'
@@ -61,6 +63,10 @@ export interface Outcome {
   exit: number
 }
 
+/** The longest Amdahl waits before it tries a refused email again, and the wait when the server names none. */
+const MAX_RETRY_SECONDS = 60
+const DEFAULT_RETRY_SECONDS = 10
+
 const sentence = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`)
 
 /** `4`, `4 and 5`, `4, 5 and 6`. */
@@ -69,10 +75,10 @@ function listOf(numbers: number[]): string {
 }
 
 /** The `context` of email `i`: the file's, the plan's rules first, and the touches so far. Only keys that carry something. */
-function contextFor(job: Job, i: number, finals: FinalEmail[]): Record<string, unknown> | undefined {
+function contextFor(job: Job, i: number, finals: FinalEmail[], now: Date): Record<string, unknown> | undefined {
   const { rules: fileRules, ...rest } = job.fileContext ?? {}
   const rules = [...(job.plan ? planRules(job.plan.goal, job.plan.steps, i) : []), ...(Array.isArray(fileRules) ? fileRules : [])]
-  const touches = finals.slice(0, i).map((f) => touchOf(f)).filter((t) => t.summary)
+  const touches = finals.slice(0, i).map((f) => touchOf(f, now)).filter((t) => t.summary)
   const context: Record<string, unknown> = { ...rest }
   if (rules.length) context.rules = rules
   if (touches.length) context.prior_touches = touches
@@ -134,10 +140,20 @@ export async function runSequence(ctx: Ctx, credential: Credential, job: Job): P
     const n = i + 1
     const email = job.emails[i] as SeqEmail
     if (!out.json && io.stderrIsTTY) out.info(`Amdahl is ${writing ? 'writing' : 'improving'} email ${n} of ${total}.${i === 0 ? ' Each email can take a minute.' : ''}`)
-    const context = contextFor(job, i, finals)
+    const context = contextFor(job, i, finals, now)
     let result: Record<string, unknown>
     try {
-      result = await optimizeOne(ctx, credential, writing ? '' : sentMessage(email, i), { ...job.base, ...(context ? { context } : {}) }, `email ${n}`)
+      const ask = () => optimizeOne(ctx, credential, writing ? '' : sentMessage(email, i), { ...job.base, ...(context ? { context } : {}) }, `email ${n}`)
+      try {
+        result = await ask()
+      } catch (err) {
+        const refused = err instanceof CliError ? err : toCliError(err)
+        if (refused.code !== 'rate_limited') throw refused
+        const seconds = Math.min(MAX_RETRY_SECONDS, Math.ceil(refused.retryAfterSeconds ?? DEFAULT_RETRY_SECONDS))
+        if (!out.json && io.stderrIsTTY) out.info(`Amdahl is busy. Trying email ${n} again in ${seconds} ${seconds === 1 ? 'second' : 'seconds'}.`)
+        await io.sleep(seconds * 1000)
+        result = await ask()
+      }
     } catch (err) {
       const e = err instanceof CliError ? err : toCliError(err)
       failed = { index: n, reason: e.code, detail: e.message, ...(e.hint ? { hint: e.hint } : {}) }
@@ -185,13 +201,13 @@ function fieldsOf(job: Job, done: Done[]): Outcome['fields'] {
 }
 
 /** The document `--json` prints. */
-export function jsonDocument(job: Job, outcome: Outcome, file: string | null): Record<string, unknown> {
+export function jsonDocument(job: Job, outcome: Outcome, file: string | null, saved = 0): Record<string, unknown> {
   return {
     ok: outcome.failed === null,
     mode: job.plan ? 'write' : 'improve',
     emails: outcome.done.map((d) => ({ index: d.index, subject: d.subject, message: d.message, run_id: d.run_id ?? null, result: d.result })),
     fields: outcome.fields,
     ...(outcome.failed ? { failed: { index: outcome.failed.index, reason: outcome.failed.reason, detail: outcome.failed.detail } } : {}),
-    ...(file ? { file } : {}),
+    ...(file ? { file, saved } : {}),
   }
 }

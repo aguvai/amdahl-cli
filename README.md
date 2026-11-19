@@ -323,6 +323,7 @@ amdahl status                # can this workspace optimize, and what blocks it
 amdahl optimize draft.md     # rewrite one message (or pipe it in with -, or run it bare and paste)
 amdahl optimize --list drafts.csv   # rewrite a whole list in one batch
 amdahl optimize --list drafts.csv --for lemlist --channel email   # and a CSV lemlist imports
+amdahl sequence emails.md    # improve 2 to 10 emails in order, each after the ones before it
 amdahl grade draft.md        # grade a message: a score and the lines behind it
 amdahl prompt prompt.md      # grade or improve a reusable prompt by the emails it writes
 amdahl search "what objections came up in lost deals?"   # ask about your customers
@@ -373,6 +374,9 @@ amdahl status
 amdahl optimize [<file>... | -] [--channel email|linkedin] [--evidence off|workspace]
                 [--on-unsupported flag|remove] [--tries] [--context <file.json>]
 amdahl optimize --list <file.csv|file.jsonl> [--no-wait] [--batch <id>] [--force] [--for <tool>] [the optimize flags]
+amdahl sequence [<file>|-] [--evidence off|workspace] [--on-unsupported flag|remove] [--context <file.json>]
+                [--csv [<file.csv>]] [--force]
+amdahl sequence --write "<goal>" [--emails <2-6>] [--plan <file>] [--context <file.json>] [--csv [<file.csv>]] [--force]
 amdahl grade <file|-> [--channel email|linkedin] [--evidence off|workspace] [--context <file.json>]
 amdahl prompt <file|-> [--mode improve|grade] [--recipients <file.json>] [--channel email|linkedin]
                 [--context <file.json>] [--no-wait]
@@ -803,6 +807,106 @@ Import file for lemlist: drafts-lemlist.csv
   ready), `ready`, `left_out` (`failed`, `not_written`, `needs_input`,
   `no_contact`) and `over_limit`. With no lead ready, no file is written and
   the exit is 1.
+
+## Improve or write a sequence
+
+```sh
+amdahl sequence emails.md
+```
+
+```
+Email 1 of 3
+Subject: Ramping SDRs at {{company}}
+
+<the improved email>
+What Amdahl changed:
+  - "We are the leading onboarding platform."
+    Cut: nothing in your calls backs it.
+
+Email 2 of 3
+<the improved reply>
+...
+```
+
+`sequence` improves 2 to 10 emails in order. Each email is written as a
+follow-up to the improved emails before it, so email 3 knows what 1 and 2 now
+say. Each email is one run (`POST /messages/optimize`), so a sequence of 4 is
+4 runs. A single message is still `amdahl optimize`.
+
+The file is text or markdown, or `-` for standard input. A line of `---`, or a
+heading such as `Email 2` or `Follow-up`, starts the next email. An email may
+start with a `Subject:` line. A later email with none is a reply in the same
+thread and goes with no subject:
+
+```
+Subject: Ramping SDRs at {{company}}
+
+Hi {{first_name}}, most teams take 4 months to ramp a new rep.
+---
+Hi {{first_name}}, bumping this up. Worth a quick call?
+---
+Subject: Close the loop?
+
+Hi {{first_name}}, should I stop reaching out?
+```
+
+A CSV file has one column for each email, `step_1_body`, `step_2_body` and so
+on, and may have `step_1_subject` and so on. The first row with text is the
+sequence.
+
+To write a new sequence, give the goal:
+
+```sh
+amdahl sequence --write "Follow up with everyone who came to our dinner." --emails 4
+amdahl sequence --write "Follow up after the dinner." --plan plan.txt
+```
+
+`--emails` takes 2 to 6 (default 3). `--plan` is your own plan, one email on
+each line, `Name: job` or `Name` alone. At a terminal, the plan is shown and
+Amdahl asks `Write these 4 emails? [Y/n]`. An agent, CI, a pipe or `--json` is
+not asked.
+
+Fill-in fields such as `{{first_name}}` are sent as they are. After the last
+email, one line says they are all still there, or names the emails that lost
+one.
+
+`--csv` also saves the emails as a CSV with the columns Email, Subject and
+Message. With no name, it goes next to the file (`emails.md` gives
+`emails-amdahl.csv`), or `sequence-amdahl.csv` here. `--csv <file.csv>` names
+it. A file that already exists is not replaced unless you add `--force`, and
+that is checked before anything is sent. `--csv` never takes your input, `--plan`
+or `--context` file as its name.
+
+If the run stops partway, the emails that came back are saved, since each one
+was a run:
+
+```
+Saved emails 1 to 8 only: emails-amdahl.csv
+```
+
+With none back, it says `Nothing was saved to emails-amdahl.csv.`
+
+An email that is refused as rate limited is tried once more. Amdahl waits as
+long as the server asks (`retry_after_seconds` or the `Retry-After` header, at
+most 60 seconds, and 10 with no number) and, at a terminal, says so:
+
+```
+Amdahl is busy. Trying email 9 again in 20 seconds.
+```
+
+A second refusal stops the run, and the emails before it are printed and saved.
+Any other error is not retried.
+
+With `--json` it prints one document: `ok`, `mode` (`improve` or `write`),
+`emails` (each with `index`, `subject`, `message`, `run_id` and `result`),
+`fields` (`kept` and `lost`), `failed` (`index`, `reason` and `detail`, only
+when the run stopped), and, when a file was written, `file` and `saved` (how
+many emails it holds).
+
+The recipes behind it are in the cookbook:
+[improve a sequence](https://github.com/amdahlco/amdahl-cookbook/blob/main/prompts/agent-platform/improve-a-sequence.md)
+and
+[write a sequence](https://github.com/amdahlco/amdahl-cookbook/blob/main/prompts/agent-platform/write-a-sequence.md).
 
 ## After you send
 

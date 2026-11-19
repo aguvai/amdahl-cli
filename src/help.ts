@@ -184,12 +184,18 @@ terminal, it asks what to do: improve emails you paste, or write a new sequence.
 In the CSV, a cell that starts with =, +, - or @ gets a ' in front, so a
 spreadsheet does not run it as a formula.
 
+The recipes behind it are in the cookbook,
+https://github.com/amdahlco/amdahl-cookbook, in prompts/agent-platform/
+improve-a-sequence.md and write-a-sequence.md.
+
 Output: each email goes to stdout under "Email 1 of 3". What Amdahl changed goes
 to stderr. A failed email stops the run: the ones before it are printed, the
-rest are not sent, and it exits 1. With --json it prints {"ok", "mode",
-"emails", "fields"}: each email has .subject, .message, .run_id and .result;
-.fields has .kept and .lost; on a failure .failed has .index, .reason and
-.detail; with --csv, .file.
+rest are not sent, and it exits 1 (6 when rate limited, after one retry). With
+--csv, the emails that came back are still saved. With --json it prints
+{"ok", "mode", "emails", "fields"}: each email has .subject, .message,
+.run_id and .result; .fields has .kept and .lost; on a failure .failed has
+.index, .reason and .detail; with --csv, .file and .saved (how many emails it
+holds).
 ${GLOBAL}`,
 
   search: `Usage: amdahl search "<question>" [--research] [--limit <n>]

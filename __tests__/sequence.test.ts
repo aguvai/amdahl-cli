@@ -337,8 +337,8 @@ describe('--csv', () => {
     expect(readFileSync(existing, 'utf8')).toBe(`${FIELDS}1,,Better: First.\r\n2,,Better: Second.`)
   })
 
-  it('--force alone is refused; --json names the file; a failed run saves nothing', async () => {
-    const io = await withKey({ optimizeAnswer: answers({ 1: { ok: false, reason: 'optimizer_error', detail: 'Down' } }) })
+  it('--force alone is refused; --json names the file; a run that failed on its first email saves nothing', async () => {
+    const io = await withKey({ optimizeAnswer: answers({ 0: { ok: false, reason: 'optimizer_error', detail: 'Down' } }) })
     const path = write(io, 'q4.md', 'First.\n---\nSecond.')
     expect((await cli(io, 'sequence', path, '--force')).stderr).toBe('Error: --force goes with --csv.\n')
     const failed = await cli(io, 'sequence', path, '--csv')
@@ -348,6 +348,137 @@ describe('--csv', () => {
     const j = await cli(ok, 'sequence', write(ok, 'q5.md', 'First.\n---\nSecond.'), '--csv', '--json')
     expect(j.json.file).toBe(join(ok.cwd, 'q5-amdahl.csv'))
     expect(j.stderr).toBe('')
+  })
+})
+
+const busy = (details: Record<string, unknown> = {}, headers?: Record<string, string>) => ({ status: 429, body: { error: { code: 'rate_limited', message: 'Too many requests.', details } }, ...(headers ? { headers } : {}) })
+
+/** A fake clock for io.sleep: the waits it was asked for, in ms. */
+function sleeps(io: FakeIo): number[] {
+  const waits: number[] = []
+  io.sleep = async (ms: number) => {
+    waits.push(ms)
+  }
+  return waits
+}
+
+describe('a run that stops partway with --csv', () => {
+  const FIELDS = 'Email,Subject,Message\r\n'
+  const THREE = 'First.\n---\nSecond.\n---\nThird.'
+
+  it('saves the emails that came back and says so on stderr', async () => {
+    const io = await withKey({ optimizeRefusal: (i) => (i >= 2 ? busy({ retry_after_seconds: 1 }) : undefined) })
+    const path = write(io, 'q4.md', THREE)
+    const r = await cli(io, 'sequence', path, '--csv')
+    const file = join(io.cwd, 'q4-amdahl.csv')
+    expect(r.code).toBe(6)
+    expect(r.stderr).toContain(`Saved emails 1 to 2 only: ${file}\n`)
+    expect(readFileSync(file, 'utf8')).toBe(`${FIELDS}1,,Better: First.\r\n2,,Better: Second.`)
+  })
+
+  it('says "email 1 only" for one, and "Nothing was saved" for none', async () => {
+    const one = await withKey({ optimizeRefusal: (i) => (i >= 1 ? busy() : undefined) })
+    const r = await cli(one, 'sequence', write(one, 'q4.md', THREE), '--csv')
+    expect(r.stderr).toContain(`Saved email 1 only: ${join(one.cwd, 'q4-amdahl.csv')}\n`)
+    expect(readFileSync(join(one.cwd, 'q4-amdahl.csv'), 'utf8')).toBe(`${FIELDS}1,,Better: First.`)
+    const none = await withKey({ optimizeAnswer: answers({ 0: { ok: false, reason: 'optimizer_error', detail: 'Down' } }) })
+    const n = await cli(none, 'sequence', write(none, 'q4.md', THREE), '--csv')
+    expect(n.code).toBe(1)
+    expect(n.stderr).toContain(`Nothing was saved to ${join(none.cwd, 'q4-amdahl.csv')}.\n`)
+    expect(existsSync(join(none.cwd, 'q4-amdahl.csv'))).toBe(false)
+  })
+
+  it('--json sets file and saved only when a file was written', async () => {
+    const part = await withKey({ optimizeRefusal: (i) => (i >= 2 ? busy() : undefined) })
+    const a = await cli(part, 'sequence', write(part, 'q4.md', THREE), '--csv', '--json')
+    expect([a.json.ok, a.json.file, a.json.saved]).toEqual([false, join(part.cwd, 'q4-amdahl.csv'), 2])
+    const none = await withKey({ optimizeAnswer: answers({ 0: { ok: false, reason: 'optimizer_error', detail: 'Down' } }) })
+    const b = await cli(none, 'sequence', write(none, 'q4.md', THREE), '--csv', '--json')
+    expect('file' in b.json || 'saved' in b.json).toBe(false)
+    const ok = await withKey()
+    const c = await cli(ok, 'sequence', write(ok, 'q4.md', THREE), '--csv', '--json')
+    expect(c.json.saved).toBe(3)
+  })
+
+  it('still refuses a file that is there before it sends anything', async () => {
+    const io = await withKey()
+    write(io, 'q4-amdahl.csv', 'mine')
+    const r = await cli(io, 'sequence', write(io, 'q4.md', THREE), '--csv')
+    expect(r.code).toBe(2)
+    expect(server?.log.filter((l) => l.path === OPTIMIZE)).toEqual([])
+  })
+})
+
+describe('a rate limited email is tried once more', () => {
+  it('waits the server\'s retry_after_seconds, says so at a terminal, then goes on', async () => {
+    const io = await withKey({ optimizeRefusal: (i) => (i === 1 ? busy({ retry_after_seconds: 20 }) : undefined) })
+    io.stderrIsTTY = true
+    const waits = sleeps(io)
+    const r = await cli(io, 'sequence', write(io, 'q4.md', 'First.\n---\nSecond.'))
+    expect(r.code).toBe(0)
+    expect(waits).toEqual([20000])
+    expect(r.stderr).toContain('Amdahl is busy. Trying email 2 again in 20 seconds.\n')
+    expect(bodies().map((b) => b.message)).toEqual(['First.', 'Second.', 'Second.'])
+    expect(r.stdout).toContain('Email 2 of 2\nBetter: Second.')
+  })
+
+  it('reads the Retry-After header, caps the wait at 60 seconds, and waits 10 with no number; prints nothing off a terminal', async () => {
+    for (const [refusal, wait] of [[busy({}, { 'Retry-After': '7' }), 7000], [busy({ retry_after_seconds: 500 }), 60000], [busy(), 10000]] as const) {
+      const io = await withKey({ optimizeRefusal: (i) => (i === 0 ? refusal : undefined) })
+      const waits = sleeps(io)
+      const r = await cli(io, 'sequence', write(io, 'q4.md', 'First.\n---\nSecond.'))
+      expect([r.code, waits, r.stderr.includes('Amdahl is busy')]).toEqual([0, [wait], false])
+    }
+  })
+
+  it('a second refusal stops the run, and only rate_limited is retried', async () => {
+    const io = await withKey({ optimizeRefusal: (i) => (i >= 1 ? busy({ retry_after_seconds: 3 }) : undefined) })
+    const waits = sleeps(io)
+    const r = await cli(io, 'sequence', write(io, 'q4.md', 'First.\n---\nSecond.'))
+    expect([r.code, waits, bodies().length]).toEqual([6, [3000], 3])
+    expect(r.stderr).toContain('Email 2 was not improved (rate_limited)')
+    const down = await withKey({ optimizeRefusal: (i) => (i === 0 ? { status: 500, body: { error: { code: 'server_error', message: 'Down' } } } : undefined) })
+    const more = sleeps(down)
+    const d = await cli(down, 'sequence', write(down, 'q4.md', 'First.\n---\nSecond.'))
+    expect([d.code, more, bodies().length]).toEqual([8, [], 1])
+  })
+})
+
+describe('--csv never points at an input', () => {
+  it('refuses the input, the plan and the context file, before anything is sent', async () => {
+    const io = await withKey()
+    const drafts = write(io, 'drafts.csv', 'step_1_body,step_2_body\nFirst,Second\n')
+    const plan = write(io, 'plan.csv', 'A\nB\n')
+    const context = write(io, 'ctx.csv', '{}')
+    for (const args of [
+      ['sequence', 'drafts.csv', '--csv', 'drafts.csv', '--force'],
+      ['sequence', drafts, '--csv', join(io.cwd, '.', 'drafts.csv'), '--force'],
+      ['sequence', '--write', 'A goal.', '--plan', plan, '--csv', plan, '--force'],
+      ['sequence', drafts, '--context', context, '--csv', context, '--force'],
+    ]) {
+      const r = await cli(io, ...args)
+      const named = args[args.indexOf('--csv') + 1] === context ? context : args[args.indexOf('--csv') + 1] === plan ? plan : args[1]
+      expect([r.code, r.stderr]).toEqual([2, `Error: --csv would replace your input file ${named === args[1] ? args[1] : named}. Name another file, or leave the name out.\n`])
+    }
+    expect(server?.log.filter((l) => l.path === OPTIMIZE)).toEqual([])
+    expect(readFileSync(drafts, 'utf8')).toBe('step_1_body,step_2_body\nFirst,Second\n')
+  })
+
+  it('refuses --csv <file.csv> with no input and no --write, with the usage', async () => {
+    const io = await withKey()
+    const r = await cli(io, 'sequence', '--csv', 'drafts.csv')
+    expect([r.code, r.stderr]).toEqual([2, 'Error: --csv drafts.csv says where to save, but there are no emails to improve.\nUsage: amdahl sequence <file> | -   or   amdahl sequence --write "<goal>"\n'])
+    expect(server?.log.filter((l) => l.path === OPTIMIZE)).toEqual([])
+  })
+})
+
+describe('every touch in one run carries the same day', () => {
+  it('the run\'s own clock, not the moment each touch is built', async () => {
+    const io = await withKey()
+    io.now = () => new Date(2026, 10, 20, 12).getTime()
+    await cli(io, 'sequence', write(io, 'q4.md', SEQ))
+    const days = bodies().flatMap((b) => ((b.context as { prior_touches?: { on: string }[] } | undefined)?.prior_touches ?? []).map((t) => t.on))
+    expect(days).toEqual(['2026-11-20', '2026-11-20', '2026-11-20'])
   })
 })
 
@@ -556,6 +687,7 @@ describe('what is kept', () => {
     expect(r.code).toBe(0)
     expect(r.stdout).toContain('each is written as a follow-up to the improved emails before')
     expect(r.stdout).toContain('Fill-in fields such as {{first_name}} are sent as they are.')
+    expect(r.stdout).toContain('https://github.com/amdahlco/amdahl-cookbook, in prompts/agent-platform/\nimprove-a-sequence.md and write-a-sequence.md.')
     expect(r.stdout.split('\n').filter((l) => [...l].length > 80)).toEqual([])
     expect((await cli(io, '--help')).stdout).toContain('amdahl sequence emails.md')
   })

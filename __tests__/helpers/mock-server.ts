@@ -95,6 +95,8 @@ export interface MockOptions {
   decision?: 'approved' | 'denied' | 'expired'
   /** The optimize result body (inside `data`). */
   optimizeResult?: Record<string, unknown>
+  /** A refusal for an optimize request, by its call number from 0: the status, the error body and any headers. */
+  optimizeRefusal?: (index: number) => { status: number; body: unknown; headers?: Record<string, string> } | undefined
   /** The optimize result body for each request, from the request's own body and its place (from 0): a message made from what was sent. Wins over `optimizeResult`. */
   optimizeAnswer?: (body: Record<string, unknown>, index: number) => Record<string, unknown>
   /** Access token lifetime in seconds. */
@@ -589,6 +591,8 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
       if (path === '/api/platform/v1/messages/optimize' && req.method === 'POST') {
         const input = JSON.parse(body) as { message?: string; mode?: string; evidence?: string; context?: unknown }
         const answered = optimizeCalls++
+        const refusal = options.optimizeRefusal?.(answered)
+        if (refusal) return res.writeHead(refusal.status, { 'Content-Type': 'application/json', ...refusal.headers }).end(JSON.stringify(refusal.body))
         const problems = optimizeProblems(input)
         if (problems.length) return json(res, 400, { error: { code: 'invalid_input', message: `Input failed schema validation: ${problems[0]}`, details: { errors: problems } } })
         if (input.mode === 'grade') {
