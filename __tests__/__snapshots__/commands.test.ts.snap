@@ -21,7 +21,8 @@ What you can do:
                                  Smartlead, lemlist, HeyReach, Apollo and more)
   amdahl grade draft.md          Grade a message: score and the lines behind
   amdahl prompt prompt.md        Grade or improve a reusable prompt by the
-                                 emails it writes
+                                 emails it writes (with no file, at a
+                                 terminal, three short steps)
   amdahl search "<question>"     Ask about your customers, calls and deals
   amdahl recipes                 The console's questions (amdahl search
                                  --recipe <id> runs one)
@@ -72,11 +73,13 @@ Commands:
            five lines. No line evaluated reads "Not graded", never 0. A grade
            does not predict replies. --json prints {ok, file, result}: the
            grade is .result.grade.
-  prompt <file|-> [--mode improve|grade] [--recipients <file.json>]
+  prompt <file|-> [--mode improve|grade] [--recipients <file.json|file.csv>]
            [--channel email|linkedin] [--context <file.json>] [--no-wait]
   prompt --run <id> [--no-wait]
            Grade or improve a reusable prompt by the emails it writes. A run
            takes minutes: its id is printed, --run <id> reads it later.
+  prompt   With no file, at a terminal, it asks in three steps: the prompt,
+           who to test it on, and Improve or Grade.
   runs [--limit <n>]                         Your latest runs, on this computer
   run <run-id>                               One run: your draft, then Amdahl's
   data [--surface interactions|deals|deal_qualification]
