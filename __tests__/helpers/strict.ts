@@ -92,6 +92,25 @@ export function feedbackProblem(input: unknown): string | null {
   return null
 }
 
+// ── feedback.record: operations/implementations/feedback/recordFeedback.ts (2026-11-19) ────────
+
+const RATING_KEYS = ['answer_id', 'surface', 'rating', 'comment', 'email_ok', 'subject_id', 'research_id', 'search_query_id', 'client', 'client_version', 'question', 'route']
+
+/** The strict-schema refusal of a feedback.record body (a 400), or null. */
+export function ratingProblem(input: unknown): string | null {
+  if (!isObject(input)) return 'body: Invalid input.'
+  const extra = Object.keys(input).find((k) => !RATING_KEYS.includes(k))
+  if (extra) return `${extra}: Unrecognized key`
+  if (typeof input.answer_id !== 'string' || !input.answer_id.trim() || input.answer_id.length > 80) return 'answer_id: Invalid'
+  if (!['search', 'research', 'optimize', 'grade', 'lead_list', 'other'].includes(String(input.surface))) return 'surface: Invalid enum value.'
+  if (!['up', 'down'].includes(String(input.rating))) return 'rating: Invalid enum value.'
+  if (input.comment !== undefined && (typeof input.comment !== 'string' || input.comment.length > 2000)) return 'comment: String must contain at most 2000 character(s)'
+  if (input.email_ok !== undefined && typeof input.email_ok !== 'boolean') return 'email_ok: Expected boolean'
+  if (input.client !== undefined && !['cli', 'api'].includes(String(input.client))) return 'client: Invalid enum value.'
+  if (input.client_version !== undefined && (typeof input.client_version !== 'string' || input.client_version.length > 64)) return 'client_version: Invalid'
+  return null
+}
+
 // ── messages.report_send: messages/_reportSendSchema.ts, messageOptimizer/sendReports ────────
 
 // The server's send providers (2026-11-13).

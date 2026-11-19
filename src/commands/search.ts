@@ -23,6 +23,7 @@
 // and `--research-id <id>` reads a job started earlier (the same wait).
 
 import { amdahlCommand } from '../command-name'
+import { askRating } from '../rating'
 import { apiClient, call, resolveCredential, str, type Credential, type Ctx } from '../context'
 import { CliError, EXIT, usageError } from '../errors'
 import { blockLines } from '../blocks'
@@ -395,6 +396,7 @@ export async function search(ctx: Ctx, args: string[]): Promise<number> {
     if (refused) out.info(wrap(refused).join('\n'))
   }
   out.result({}, searchLines(result, question, ctx.flags.research === true).join('\n'))
+  await askRating(ctx, credential, { id: field(result.query_id), surface: 'search' })
   return EXIT.ok
 }
 

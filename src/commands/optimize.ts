@@ -24,6 +24,7 @@
 
 import { amdahlCommand } from '../command-name'
 import { feedbackLinkOn } from '../config'
+import { askRating } from '../rating'
 import { apiClient, resolveCredential, toCliError, str, type Credential, type Ctx } from '../context'
 import { CliError, EXIT, usageError } from '../errors'
 import { readTextFile } from '../files'
@@ -399,6 +400,7 @@ export async function optimizePasted(ctx: Ctx): Promise<number> {
   const did = whatAmdahlDid(result)
   const connect = tipsOn(ctx) && (saysNoData(result) || (await noData)) ? [noDataLine()] : []
   out.info([...did, ...feedbackLines(ctx, result), ...sentLines(result.run_id, undefined, canAsk(ctx)), ...connect, nextTimeLine(ctx)].join('\n'))
+  await askRating(ctx, credential, { id: text(result.run_id), surface: 'optimize' })
   return EXIT.ok
 }
 
@@ -468,6 +470,7 @@ export async function optimize(ctx: Ctx, args: string[]): Promise<number> {
       out.result({}, String(result.message ?? ''))
       const lines = [...whatAmdahlDid(result), ...feedbackLines(ctx, result), ...sentLines(result.run_id, undefined, canAsk(ctx))]
       if (lines.length) out.info(lines.join('\n'))
+      if (inputs.length === 1) await askRating(ctx, credential, { id: text(result.run_id), surface: 'optimize' })
     }
   }
   if (out.json) out.result(results.length === 1 ? (results[0] as unknown as Record<string, unknown>) : (results as unknown as Record<string, unknown>[]))

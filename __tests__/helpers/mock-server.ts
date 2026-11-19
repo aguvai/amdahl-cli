@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { batchProblems, feedbackProblem, optimizeProblems, promptProblems, reportSendProblem, reportSendRejection, searchProblem } from './strict'
+import { batchProblems, feedbackProblem, optimizeProblems, promptProblems, reportSendProblem, ratingProblem, reportSendRejection, searchProblem } from './strict'
 
 /** The recipe library `GET /search/suggestions` answers with (2026-11-13): 14 recipes, each with its search question and fill-ins. */
 export const SUGGESTED_LIBRARY: Record<string, unknown>[] = JSON.parse(readFileSync(new URL('../fixtures/suggestions-library.json', import.meta.url), 'utf8'))
@@ -19,6 +19,8 @@ export const API_KEY = `amdhl_${'a'.repeat(48)}`
 export const READONLY_KEY = `amdhl_${'b'.repeat(48)}`
 /** An optimize run this workspace has (made an hour ago): `feedback` and `sent` find it. */
 export const KNOWN_RUN = '88888888-8888-4888-8888-888888888888'
+/** The `query_id` the mock gives a plain search answer. */
+export const SEARCH_QUERY = '33333333-3333-4333-8333-333333333333'
 /** A well-formed run id this workspace does not have. */
 export const UNKNOWN_RUN = '00000000-0000-4000-8000-000000000000'
 /** The run id the mock gives a grade. */
@@ -389,6 +391,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
         return json(res, 200, {
           data: options.searchResult ?? {
             success: true,
+            query_id: SEARCH_QUERY,
             mode_ran: 'semantic',
             results: [
               { id: 'r1', title: 'Discovery call', speaker: 'Dana', occurred_at: '2026-10-01T10:00:00Z', text: 'Pricing came up twice.' },
@@ -497,6 +500,13 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
         if (problem) return json(res, 400, { data: { success: false, error: { code: 'invalid_argument', message: problem } } })
         if (!runs.has(feedback[1] ?? '')) return json(res, 404, { data: { success: false, error: { code: 'not_found', message: 'No optimize run with this id from you in this workspace.' } } })
         return json(res, 200, { data: { success: true, feedback_id: 'fb1', run_id: feedback[1], rubric_miss: null, outcome: input.outcome ?? null, evidence: input.evidence } })
+      }
+
+      if (path === '/api/platform/v1/feedback' && req.method === 'POST') {
+        const input = JSON.parse(body) as Record<string, unknown>
+        const problem = ratingProblem(input)
+        if (problem) return json(res, 400, { error: problem, code: 'invalid_argument' })
+        return json(res, 200, { data: { answer_id: input.answer_id, surface: input.surface, rating: input.rating, email_ok: input.email_ok === true, has_comment: typeof input.comment === 'string' && input.comment.trim() !== '' } })
       }
 
       if (path === '/api/platform/v1/messages/report_send' && req.method === 'POST') {
