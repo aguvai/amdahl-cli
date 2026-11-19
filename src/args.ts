@@ -58,6 +58,7 @@ export const COMMAND_OPTIONS: Record<string, OptionSpec> = {
     emails: { type: 'string' },
     plan: { type: 'string' },
     csv: { type: 'string' },
+    from: { type: 'string' },
     force: { type: 'boolean' },
     channel: { type: 'string' },
     evidence: { type: 'string' },
@@ -390,7 +391,7 @@ Commands:
                        that imports a CSV). lemlist, reply_io and other take
                        both channels, so add --channel email|linkedin.
   sequence [<file>|-] [--evidence off|workspace] [--on-unsupported flag|remove]
-           [--context <file.json>] [--csv [<file.csv>]] [--force]
+           [--context <file.json>] [--csv [<file.csv>]] [--force] [--from <n>]
   sequence --write "<goal>" [--emails <2-6>] [--plan <file>] [the flags above]
            Improve 2 to 10 emails in order (a text, markdown or CSV file, or -
            for stdin), or write 2 to 6 new ones. Each email is written as a

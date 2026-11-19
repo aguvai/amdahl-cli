@@ -11,6 +11,8 @@ import { linkSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { usageError } from './errors'
 
+const EXISTS_HINT = 'Add --resume to pick up where it stopped, or --force to start again.'
+
 /** Write `text` to `path` in one step. With `noReplace`, a file already there is refused (exit 2). */
 export function writeResultsFile(path: string, text: string, noReplace: boolean): void {
   const temp = join(dirname(path), `.${basename(path)}.${process.pid}.tmp`)
@@ -23,8 +25,16 @@ export function writeResultsFile(path: string, text: string, noReplace: boolean)
     try {
       linkSync(temp, path)
     } catch (err) {
-      if ((err as { code?: string } | null)?.code === 'EEXIST') throw usageError(`${path} already exists.`, 'Add --resume to pick up where it stopped, or --force to start again.')
-      throw err
+      const code = (err as { code?: string } | null)?.code
+      if (code === 'EEXIST') throw usageError(`${path} already exists.`, EXISTS_HINT)
+      // exFAT and some network shares have no hard links: write the name directly, which still refuses a file that is there.
+      if (code !== 'EPERM' && code !== 'ENOTSUP' && code !== 'EXDEV') throw err
+      try {
+        writeFileSync(path, text, { flag: 'wx' })
+      } catch (second) {
+        if ((second as { code?: string } | null)?.code === 'EEXIST') throw usageError(`${path} already exists.`, EXISTS_HINT)
+        throw second
+      }
     }
     unlinkSync(temp)
   } catch (err) {

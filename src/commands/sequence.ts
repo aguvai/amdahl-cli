@@ -17,18 +17,19 @@
 // pipe, `--json` or AMDAHL_NO_PROMPT=1 is never asked a question. `--json`
 // prints one document: see jsonDocument in sequence-run.ts.
 
-import { existsSync, statSync, writeFileSync } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import { existsSync } from 'node:fs'
 import { amdahlCommand } from '../command-name'
 import { resolveCredential, str, type Credential, type Ctx } from '../context'
 import { EXIT, usageError } from '../errors'
+import { PromptCancelled } from '../io'
 import { readTextFile } from '../files'
-import { DEFAULT_STEPS, GOAL_CHARS, MAX_RULES, MAX_STEPS, MIN_STEPS, STARTERS, parsePlan, stepLine, suggestPlan, type PlanStep } from '../sequence-plan'
-import { MAX_EMAILS, emailProblem, emailsFromCsv, sequenceCsv, sequenceFileName, splitSequence, type SeqEmail } from '../sequence-parse'
+import { DEFAULT_STEPS, GOAL_CHARS, MAX_PLAN_RULES, MAX_RULES, MAX_STEPS, MIN_STEPS, STARTERS, parsePlan, stepLine, suggestPlan, type PlanStep } from '../sequence-plan'
+import { MAX_EMAILS, emailProblem, emailsFromCsv, splitSequence, type FinalEmail, type SeqEmail } from '../sequence-parse'
 import { atTerminal, canAsk } from '../terminal'
 import { credentialOrSignIn, requestOptions } from './optimize'
 import { checkLeadsFlags, readLeadsFile, sequenceLeads } from './sequence-leads'
-import { failureLine, fieldLines, jsonDocument, runSequence, type Job } from './sequence-run'
+import { assertFree, checkCsvTarget, csvTarget, defaultTarget, readSaved, saveCsv } from './sequence-csv'
+import { failureLine, fieldLines, jsonDocument, runSequence, sentThemLine, type Job } from './sequence-run'
 
 const PASTE_PROMPT = 'Paste your emails, with a line of --- between them, then press Enter on an empty line:'
 const IMPROVE = 'Improve emails I have'
@@ -38,20 +39,31 @@ const OWN_GOAL = 'Type my own goal'
 const USAGE = 'Usage: amdahl sequence <file> | -   or   amdahl sequence --write "<goal>"'
 
 /** The emails in a file (text, markdown or CSV) or on stdin. */
-async function readEmails(ctx: Ctx, file: string): Promise<SeqEmail[]> {
+async function readEmails(ctx: Ctx, file: string, leads: boolean): Promise<SeqEmail[]> {
   const text = file === '-' ? await ctx.io.readStdin() : readTextFile(file)
   if (!text.trim()) throw usageError(`${file === '-' ? 'Stdin' : file} is empty.`)
   if (file !== '-' && /\.(csv|tsv)$/i.test(file)) {
     const read = emailsFromCsv(text)
     if (!read.ok) throw usageError(read.error)
+    if (read.rows > 1 && !leads) ctx.out.info(`This file has ${read.rows} rows; a sequence reads one. For a sequence per person: ${amdahlCommand('sequence <file> --leads <list.csv>')}`)
     return read.emails
   }
   return splitSequence(text)
 }
 
+/** What the split found, for a person at a terminal to check before anything is sent: each email's first line. */
+function foundLines(emails: SeqEmail[]): string {
+  const first = (e: SeqEmail) => (e.subject.trim() ? `Subject: ${e.subject.trim()}` : e.body.trim().split('\n')[0] ?? '').slice(0, 60)
+  return [`Found ${emails.length} emails:`, ...emails.map((e, i) => `  ${i + 1}. ${first(e)}`)].join('\n')
+}
+
 /** Refuse a sequence that cannot run, before anything is sent. */
-function checkEmails(emails: SeqEmail[], has: string): void {
-  if (emails.length < 2) throw usageError(`A sequence needs 2 emails or more. For one email: ${amdahlCommand('optimize <file>')}`)
+function checkEmails(emails: SeqEmail[], has: string, text = true): void {
+  if (emails.length < 2) {
+    const found = `Found ${emails.length} ${emails.length === 1 ? 'email' : 'emails'}.`
+    const hint = `For one email: ${amdahlCommand('optimize <file>')}`
+    throw usageError(text ? `${found} Put a line of --- between emails.` : `${found} A sequence needs 2 or more.`, hint)
+  }
   if (emails.length > MAX_EMAILS) throw usageError(`Amdahl improves up to ${MAX_EMAILS} emails. ${has} ${emails.length}.`)
   const problem = emailProblem(emails)
   if (problem) throw usageError(problem)
@@ -107,18 +119,23 @@ function requestBase(ctx: Ctx): Pick<Job, 'base' | 'fileContext'> {
   return { base: { channel: 'email', ...rest }, fileContext }
 }
 
-/** A sequence to write: the goal, the plan, and the blank emails. Null when the person said no. */
-async function writeJob(ctx: Ctx, goal: string, asked: number | undefined, ask: boolean, fileContext: Job['fileContext']): Promise<Pick<Job, 'emails' | 'plan'> | null> {
+/**
+ * A sequence to write: the goal, the plan, and the blank emails. `before` runs
+ * after the checks and before the plan is shown, so a missing sign-in is found
+ * before anyone is asked "Write these N emails?". Null when the person said no.
+ */
+async function writeJob(ctx: Ctx, goal: string, asked: number | undefined, ask: boolean, fileContext: Job['fileContext'], before: () => Promise<void>): Promise<Pick<Job, 'emails' | 'plan'> | null> {
   const checked = checkGoal(goal)
   const steps = planFor(ctx, checked, asked)
   const fileRules = Array.isArray(fileContext?.rules) ? fileContext.rules.length : 0
-  if (fileRules + 2 > MAX_RULES) throw usageError(`--context has ${fileRules} rules. With the plan's 2, Amdahl takes at most ${MAX_RULES} for an email. Remove ${fileRules + 2 - MAX_RULES}.`)
+  if (fileRules + MAX_PLAN_RULES > MAX_RULES) throw usageError(`--context has ${fileRules} rules. With the plan's ${MAX_PLAN_RULES}, Amdahl takes at most ${MAX_RULES} for an email. Remove ${fileRules + MAX_PLAN_RULES - MAX_RULES}.`)
+  if (ask) await before()
   if (ask && !(await confirmPlan(ctx, steps))) return null
-  return { emails: steps.map(() => ({ subject: '', body: '', sameThread: false })), plan: { goal: checked, steps } }
+  return { emails: steps.map((_, i) => ({ subject: '', body: '', sameThread: i > 0 })), plan: { goal: checked, steps } }
 }
 
 /** At a terminal with nothing given: the choice, then the paste or the goal. Null when nothing was pasted or the plan was declined. */
-async function askJob(ctx: Ctx, fileContext: Job['fileContext']): Promise<Pick<Job, 'emails' | 'plan'> | null> {
+async function askJob(ctx: Ctx, fileContext: Job['fileContext'], before: () => Promise<void>): Promise<Pick<Job, 'emails' | 'plan'> | null> {
   const { io, out } = ctx
   const pick = await io.select('What do you want to do?', [IMPROVE, WRITE], { initial: 0 })
   if (pick === 0) {
@@ -134,52 +151,7 @@ async function askJob(ctx: Ctx, fileContext: Job['fileContext']): Promise<Pick<J
   const start = await io.select('What is the sequence for?', [...STARTERS.map((s) => `${s.name}: ${s.line}`), OWN_GOAL], { initial: 0 })
   const goal = STARTERS[start]?.goal ?? (await io.prompt('What is the sequence for? Say it in a sentence or two:'))
   const answer = (await io.prompt(`How many emails, ${MIN_STEPS} to ${MAX_STEPS}? Enter for ${DEFAULT_STEPS}:`)).trim()
-  return writeJob(ctx, goal, answer ? checkCount(answer, 'The number of emails') : undefined, true, fileContext)
-}
-
-/** Where `--csv` writes: the path given, else next to the file, else here. Null without `--csv`. */
-function csvTarget(ctx: Ctx, file: string | null): string | null {
-  const flag = ctx.flags.csv
-  if (typeof flag !== 'string') return null
-  if (flag) return flag
-  return file && file !== '-' ? join(dirname(file), sequenceFileName(basename(file))) : join(ctx.io.cwd, sequenceFileName(null))
-}
-
-/** True when two paths name the same file: the same resolved path, or the same file on disk (a link, or a different case). */
-function sameFile(cwd: string, a: string, b: string): boolean {
-  if (resolve(cwd, a) === resolve(cwd, b)) return true
-  try {
-    const x = statSync(resolve(cwd, a))
-    const y = statSync(resolve(cwd, b))
-    return x.ino !== 0 && x.ino === y.ino && x.dev === y.dev
-  } catch {
-    return false
-  }
-}
-
-/** Refuse a `--csv` that would replace one of the files the run reads, or that has no emails to go with it. */
-function checkCsvTarget(ctx: Ctx, file: string | undefined, writing: boolean): void {
-  const flag = ctx.flags.csv
-  if (typeof flag !== 'string' || !flag) return
-  if (file === undefined && !writing) throw usageError(`--csv ${flag} says where to save, but there are no emails to improve.`, USAGE)
-  const inputs = [file, str(ctx.flags.plan), str(ctx.flags.context)]
-  const clash = inputs.find((p) => p && p !== '-' && sameFile(ctx.io.cwd, flag, p))
-  if (clash) throw usageError(`--csv would replace your input file ${clash}. Name another file, or leave the name out.`)
-}
-
-/** Refuse a file that exists, unless `--force`. Checked before anything is sent. */
-function assertFree(path: string, force: boolean): void {
-  if (!force && existsSync(path)) throw usageError(`${path} already exists.`, 'Move it, or add --force to replace it.')
-}
-
-/** Write the CSV; a file that appeared since the check is not replaced without `--force`. */
-function writeCsv(path: string, text: string, force: boolean): void {
-  try {
-    writeFileSync(path, text, { flag: force ? 'w' : 'wx' })
-  } catch (err) {
-    if ((err as { code?: string } | null)?.code === 'EEXIST') throw usageError(`${path} already exists.`, 'Move it, or add --force to replace it.')
-    throw err
-  }
+  return writeJob(ctx, goal, answer ? checkCount(answer, 'The number of emails') : undefined, true, fileContext, before)
 }
 
 /** The line that says how to keep the emails, for a person at a terminal. */
@@ -188,64 +160,137 @@ function csvTip(file: string | null, writing: boolean): string {
   return writing ? 'To save them as a CSV: run the same command with --csv.' : `To save them as a CSV: ${amdahlCommand('sequence <file> --csv')}`
 }
 
+/** `--from <n>`: the email to start at (from 2), or null. */
+function fromFlag(ctx: Ctx, file: string | undefined, writeFlag: string | undefined, leads: boolean): number | null {
+  const raw = ctx.flags.from
+  if (raw === undefined) return null
+  const n = Number(String(raw).trim())
+  if (!Number.isInteger(n) || n < 2 || n > MAX_EMAILS) throw usageError(`--from must be a whole number from 2 to ${MAX_EMAILS}: the email to improve next.`)
+  if (leads || writeFlag !== undefined || file === undefined) throw usageError('--from goes with improving a file of emails, after a run saved some with --csv.')
+  return n
+}
+
+/** The finished emails before `--from`, read from the CSV an earlier run saved. */
+function savedBefore(ctx: Ctx, file: string, from: number): { path: string; finals: FinalEmail[] } {
+  const flag = typeof ctx.flags.csv === 'string' ? ctx.flags.csv : null
+  if (file === '-' && !flag) throw usageError('--from needs the CSV an earlier run saved: add --csv <file.csv>.')
+  const path = flag || defaultTarget(ctx, file)
+  const read = readSaved(ctx, path, from - 1)
+  if ('error' in read) throw usageError(read.error)
+  return { path, finals: read.finals }
+}
+
+/** What to run next after a stop: the same command, `--from` the next email, on the saved file. */
+function continueLine(file: string | null, path: string, next: number): string {
+  return `To pick up: ${amdahlCommand(`sequence ${file ?? '<file>'} --csv ${path} --from ${next}`)}`
+}
+
 /** `amdahl sequence [<file>|-] [--write "<goal>"]`. */
 export async function sequence(ctx: Ctx, args: string[]): Promise<number> {
   const { flags, out } = ctx
   const file = args[0]
-  if (args.length > 1) throw usageError('Give one file of emails, or - for stdin.', USAGE)
   const writeFlag = typeof flags.write === 'string' ? flags.write : undefined
+  checkCsvTarget(ctx, args, writeFlag !== undefined)
+  if (args.length > 1) throw usageError('Give one file of emails, or - for stdin.', USAGE)
   if (file !== undefined && writeFlag !== undefined) throw usageError('Give the emails to improve, or --write "<goal>", not both.')
   if (writeFlag === undefined && (flags.emails !== undefined || flags.plan !== undefined)) throw usageError('--emails and --plan go with --write "<goal>".')
   checkLeadsFlags(ctx, file, writeFlag)
   const leads = typeof flags.leads === 'string' ? readLeadsFile(ctx) : null
   if (flags.force === true && typeof flags.csv !== 'string' && !leads) throw usageError('--force goes with --csv.')
+  const from = fromFlag(ctx, file, writeFlag, leads !== null)
   const bare = file === undefined && writeFlag === undefined
-  checkCsvTarget(ctx, file, writeFlag !== undefined)
   // An agent, CI, a pipe and --json cannot be asked: they get the usage.
   if (bare && !(atTerminal(ctx) && !out.json)) throw usageError('Give a file of emails, or a goal to write them from.', USAGE)
 
+  const saved = from !== null && file !== undefined ? savedBefore(ctx, file, from) : null
+  // --from reads the CSV an earlier run saved, and writes the whole sequence back to it, with or without --csv.
+  const target = csvTarget(ctx, file ?? null) ?? saved?.path ?? null
+  if (target) assertFree(ctx, target, flags.force === true, saved !== null)
   const request = requestBase(ctx)
   let credential: Credential | null = bare ? await credentialOrSignIn(ctx, 'paste your emails') : null
+  const signIn = async () => void (credential ??= await credentialOrSignIn(ctx, 'write your sequence'))
   let emails: SeqEmail[]
   let plan: Job['plan'] = null
   if (bare) {
-    const asked = await askJob(ctx, request.fileContext)
+    const asked = await askJob(ctx, request.fileContext, signIn)
     if (!asked) return EXIT.ok
     ;({ emails, plan } = asked)
   } else if (writeFlag !== undefined) {
-    const written = await writeJob(ctx, writeFlag, undefined, canAsk(ctx), request.fileContext)
+    const written = await writeJob(ctx, writeFlag, undefined, canAsk(ctx), request.fileContext, signIn)
     if (!written) return EXIT.ok
     ;({ emails, plan } = written)
   } else {
-    emails = await readEmails(ctx, file as string)
-    checkEmails(emails, file === '-' ? 'The input has' : 'This file has')
+    emails = await readEmails(ctx, file as string, leads !== null)
+    const csv = file !== '-' && /\.(csv|tsv)$/i.test(file as string)
+    checkEmails(emails, file === '-' ? 'The input has' : 'This file has', !csv)
+    if (!csv && !leads && atTerminal(ctx) && !out.json) out.info(foundLines(emails))
+    if (from !== null && from > emails.length) throw usageError(`--from ${from} is past the last email: this file has ${emails.length}.`)
   }
 
   if (leads) return sequenceLeads(ctx, { file: file ?? null, emails, plan, base: request.base }, leads)
 
-  const target = csvTarget(ctx, file ?? null)
-  if (target) assertFree(target, flags.force === true)
   credential ??= await resolveCredential(ctx)
 
-  const job: Job = { emails, plan, ...request }
+  const job: Job = { emails, plan, ...request, ...(saved ? { resume: { earlier: saved.finals } } : {}) }
   const outcome = await runSequence(ctx, credential, job)
   const { failed } = outcome
+  const everything = [...(saved?.finals ?? []), ...outcome.done.map((d) => d.final)]
   if (!out.json) {
     const fields = fieldLines(outcome.fields, outcome.fields.kept)
     if (fields.length) out.info(fields.join('\n'))
-    if (failed) out.info(`${failureLine(failed, emails.length, plan !== null)}${failed.hint ? `\n${failed.hint}` : ''}`)
+    if (failed?.account && outcome.done.length === 0) out.info(`${failed.detail}${failed.hint ? `\n${failed.hint}` : ''}`)
+    else if (failed) out.info(`${failureLine(failed, emails.length, plan !== null)}${failed.hint ? `\n${failed.hint}` : ''}`)
+    const sent = sentThemLine(ctx, outcome.done)
+    if (sent.length) out.info(sent.join('\n'))
   }
-  let saved: string | null = null
+
+  const interrupted = outcome.stopped === 'interrupted'
+  const where = target ?? (interrupted && atTerminal(ctx) ? defaultTarget(ctx, file ?? null) : null)
+  let savedTo: string | null = null
+  let fileError: string | null = null
   const wrote = outcome.done.length
-  if (target && wrote > 0) {
-    writeCsv(target, sequenceCsv(outcome.done.map((d) => d.final)), flags.force === true)
-    saved = target
+  if (where && wrote > 0) {
+    const problem = saveCsv(where, everything, flags.force === true || saved !== null || (where !== target && false))
+    if (problem) fileError = problem
+    else savedTo = where
     if (!out.json) {
-      if (!failed) out.result({}, `Saved: ${target}`)
-      else out.info(`Saved ${wrote === 1 ? 'email 1' : `emails 1 to ${wrote}`} only: ${target}`)
+      if (problem) out.info(problem)
+      else if (!failed && !outcome.stopped) out.result({}, `Saved: ${where}`)
+      else out.info(`Saved ${everything.length === 1 ? 'email 1' : `emails 1 to ${everything.length}`} only: ${where}`)
     }
-  } else if (target && failed && !out.json) out.info(`Nothing was saved to ${target}.`)
-  else if (!failed && !target && !out.json && atTerminal(ctx)) out.info(csvTip(file ?? null, plan !== null))
-  if (out.json) out.result(jsonDocument(job, outcome, saved, wrote))
-  return outcome.exit
+  } else if (where && (failed || outcome.stopped) && !out.json) out.info(`Nothing was saved to ${where}.`)
+  else if (!failed && !target && !out.json && !outcome.stopped && canAsk(ctx)) fileError = await offerSave(ctx, file ?? null, everything, plan !== null)
+  else if (!failed && !target && !out.json && !outcome.stopped && atTerminal(ctx)) out.info(csvTip(file ?? null, plan !== null))
+  if (interrupted && !out.json) {
+    out.info(wrote === 0 ? 'Stopped. No email had come back yet.' : `Stopped. ${outcome.done.map((d) => `Email ${d.index}: run ${String(d.run_id ?? 'unknown')}`).join('; ')}.`)
+    if (wrote > 0 && savedTo && file !== undefined && everything.length < emails.length) out.info(continueLine(file, savedTo, everything.length + 1))
+    else if (wrote > 0 && !savedTo) out.info('Nothing was saved. To keep the emails next time, add --csv.')
+  }
+  if (!out.json && bare && plan) out.info(`Next time: ${amdahlCommand('sequence --write "<goal>" --csv')}`)
+  if (out.json) out.result(jsonDocument(job, outcome, savedTo, everything.length, fileError))
+  return fileError && outcome.exit === EXIT.ok ? EXIT.general : outcome.exit
+}
+
+/** At a terminal, after a finished run with no `--csv`: "Save as <file>? [Y/n]". The person's yes is the export. Returns the sentence about a failed save, or null. */
+async function offerSave(ctx: Ctx, file: string | null, finals: FinalEmail[], writing: boolean): Promise<string | null> {
+  const { out, io } = ctx
+  const path = defaultTarget(ctx, file)
+  if (existsSync(path)) {
+    out.info(`${path} already exists. To replace it: ${amdahlCommand(`sequence ${file ?? '<file>'} --csv --force`)}`)
+    return null
+  }
+  let answer: string
+  try {
+    answer = (await io.prompt(`Save as ${path}? [Y/n]`)).trim()
+  } catch (err) {
+    if (!(err instanceof PromptCancelled)) throw err
+    answer = 'n'
+  }
+  if (answer !== '' && !/^y/i.test(answer)) {
+    out.info(csvTip(file, writing))
+    return null
+  }
+  const problem = saveCsv(path, finals, false)
+  out.info(problem ?? `Saved: ${path}`)
+  return problem
 }

@@ -19,6 +19,8 @@ afterEach(async () => {
   server = null
 })
 
+const FIRST_NAME = 'Greet the reader with {{first_name}} so the sequencer fills it in.'
+const NO_DATE = 'Do not name the date or day of an earlier email: the send dates are not set yet.'
 const OPTIMIZE = '/api/platform/v1/messages/optimize'
 const DAY = '2026-11-18'
 
@@ -96,7 +98,7 @@ describe('improving a sequence', () => {
     const r = await cli(io, 'sequence', write(io, 'emails.md', SEQ))
     expect(r.code).toBe(0)
     expect(r.stdout).toBe(OUT_3)
-    expect(r.stderr).toBe('Kept your fill-in fields: {{company}}, {{first_name}}.\n')
+    expect(r.stderr).toBe(`Run: run-1\nRun: run-2\nRun: run-3\nKept your fill-in fields: {{company}}, {{first_name}}.\nSent them? amdahl sent <run id> --provider <provider> --channel <channel> --sent-as returned --provider-send-id <id>\n`)
     expect(bodies()).toEqual([
       { message: 'Subject: Ramping SDRs at {{company}}\n\nHi {{first_name}}, most teams take 4 months to ramp a new rep.', channel: 'email' },
       { message: 'Hi {{first_name}}, bumping this up. Worth a quick call?', channel: 'email', context: { prior_touches: [{ on: DAY, channel: 'email', summary: TOUCH_1 }] } },
@@ -121,7 +123,12 @@ describe('improving a sequence', () => {
     const r = await cli(io, 'sequence', path, '--no-color')
     expect(r.code).toBe(0)
     expect(r.stderr.split('\n')).toEqual([
-      'Amdahl is improving email 1 of 3. Each email can take a minute.',
+      'Found 3 emails:',
+      '  1. Subject: Ramping SDRs at {{company}}',
+      '  2. Hi {{first_name}}, bumping this up. Worth a quick call?',
+      '  3. Subject: Close the loop?',
+      'About 3 minutes in all.',
+      'Amdahl is improving email 1 of 3.',
       'What Amdahl changed:',
       '  - "We are the leading onboarding platform."',
       '    Cut: nothing in your calls backs it.',
@@ -136,10 +143,14 @@ describe('improving a sequence', () => {
       '  + "Worth 15 minutes?"',
       '    Cut: it did not say how long.',
       '    New: it asks for 15 minutes.',
+      'Run: run-1',
       'Amdahl is improving email 2 of 3.',
       'Kept your draft: no rewrite beat it.',
+      'Run: run-2',
       'Amdahl is improving email 3 of 3.',
+      'Run: run-3',
       'Kept your fill-in fields: {{company}}, {{first_name}}.',
+      'Sent them? amdahl sent <run id> --provider <provider> --channel <channel> --sent-as returned --provider-send-id <id>',
       `To save them as a CSV: amdahl sequence ${path} --csv`,
       '',
     ])
@@ -199,7 +210,7 @@ describe('improving a sequence', () => {
   it('names the email that lost a fill-in field', async () => {
     const io = await withKey({ optimizeAnswer: answers({ 1: { ok: true, message: 'Hi there, bumping this up.', run_id: 'run-2' }, 2: (plain) => ({ ...plain, message: 'Subject: Close the loop?\n\nHi, should I stop?' }) }) })
     const r = await cli(io, 'sequence', write(io, 'emails.md', SEQ))
-    expect(r.stderr).toBe('Email 2 lost {{first_name}}. Add it back before you send.\nEmail 3 lost {{first_name}}. Add it back before you send.\n')
+    expect(r.stderr).toBe(`Run: run-1\nRun: run-2\nRun: run-3\nEmail 2 lost {{first_name}}. Add it back before you send.\nEmail 3 lost {{first_name}}. Add it back before you send.\nSent them? amdahl sent <run id> --provider <provider> --channel <channel> --sent-as returned --provider-send-id <id>\n`)
     const again = await withKey({ optimizeAnswer: answers({ 1: { ok: true, message: 'Hi there, bumping this up.', run_id: 'run-2' }, 2: (plain) => ({ ...plain, message: 'Subject: Close the loop?\n\nHi, should I stop?' }) }) })
     const j = await cli(again, 'sequence', write(again, 'emails2.md', SEQ), '--json')
     expect(j.json.fields).toEqual({ kept: ['{{company}}'], lost: [{ email: 2, fields: ['{{first_name}}'] }, { email: 3, fields: ['{{first_name}}'] }] })
@@ -210,7 +221,7 @@ describe('improving a sequence', () => {
     const r = await cli(io, 'sequence', write(io, 'emails.md', SEQ))
     expect(r.code).toBe(0)
     expect(r.stdout).toContain('Email 2 of 3\nHi {{first_name}}, bumping this up. Worth a quick call?\n')
-    expect(r.stderr).toBe('Email 2 needs your input: What is the price? Kept your draft.\nKept your fill-in fields: {{company}}, {{first_name}}.\n')
+    expect(r.stderr).toBe(`Run: run-1\nEmail 2 needs your input: What is the price? Kept your draft.\nRun: run-2\nRun: run-3\nKept your fill-in fields: {{company}}, {{first_name}}.\nSent them? amdahl sent <run id> --provider <provider> --channel <channel> --sent-as returned --provider-send-id <id>\n`)
     expect((bodies()[2]?.context as { prior_touches: { summary: string }[] }).prior_touches[1]?.summary).toBe('Hi {{first_name}}, bumping this up. Worth a quick call?')
   })
 
@@ -220,7 +231,7 @@ describe('improving a sequence', () => {
     const r = await cli(io, 'sequence', write(io, 'five.md', five))
     expect(r.code).toBe(1)
     expect(r.stdout).toBe('Email 1 of 5\nBetter: Email 1 text.\n\nEmail 2 of 5\nBetter: Email 2 text.\n')
-    expect(r.stderr).toBe('Email 3 was not improved (optimizer_error): The optimizer is down. Emails 4 and 5 were not run.\n')
+    expect(r.stderr).toBe(`Run: run-1\nRun: run-2\nEmail 3 was not improved: The optimizer is down. Emails 4 and 5 were not run.\nSent them? amdahl sent <run id> --provider <provider> --channel <channel> --sent-as returned --provider-send-id <id>\n`)
     expect(bodies()).toHaveLength(3)
     const again = await withKey({ optimizeAnswer: answers({ 2: { ok: false, reason: 'optimizer_error', detail: 'The optimizer is down' } }) })
     const j = await cli(again, 'sequence', write(again, 'five2.md', five), '--json')
@@ -233,7 +244,7 @@ describe('improving a sequence', () => {
     const io = await withKey({ optimizeAnswer: answers({ 1: { ok: false, reason: 'timeout', detail: 'No answer' } }) })
     const r = await cli(io, 'sequence', write(io, 'two.md', 'First.\n---\nSecond.'))
     expect(r.code).toBe(1)
-    expect(r.stderr).toBe('Email 2 was not improved (timeout): No answer.\n')
+    expect(r.stderr).toBe(`Run: run-1\nEmail 2 was not improved: No answer.\nSent them? amdahl sent <run id> --provider <provider> --channel <channel> --sent-as returned --provider-send-id <id>\n`)
   })
 
   it('sends the options and the --context facts with every email, and adds the touches itself', async () => {
@@ -286,7 +297,7 @@ describe('what is refused before anything is sent', () => {
     expect(server?.log.filter((l) => l.path === OPTIMIZE)).toEqual([])
   }
 
-  it('fewer than 2 emails', () => refused({ 'one.md': 'Just one email.' }, 'A sequence needs 2 emails or more. For one email: amdahl optimize <file>'))
+  it('fewer than 2 emails', () => refused({ 'one.md': 'Just one email.' }, 'Found 1 email. Put a line of --- between emails.\nFor one email: amdahl optimize <file>'))
   it('more than 10 emails', () => refused({ 'many.md': Array.from({ length: 12 }, (_, k) => `Email number ${k + 1}.`).join('\n---\n') }, 'Amdahl improves up to 10 emails. This file has 12.'))
   it('an empty email, named', () => refused({ 'gap.csv': 'step_1_body,step_2_body,step_3_body\nFirst,,Third\n' }, 'Email 2 is empty.'))
   it('an email over 10,000 characters, named', () => refused({ 'long.md': `Short.\n---\n${'x'.repeat(10_001)}` }, 'Email 2 is over 10,000 characters.'))
@@ -300,7 +311,7 @@ describe('what is refused before anything is sent', () => {
 })
 
 describe('--csv', () => {
-  const FIELDS = 'Email,Subject,Message\r\n'
+  const FIELDS = '\uFEFFEmail,Subject,Message\r\n'
 
   it('saves Email, Subject and Message next to the file, with CRLF, quotes, a guard for a formula and no marker', async () => {
     const io = await withKey({ optimizeAnswer: answers({ 0: { ok: true, message: 'Subject: =Hi, there\n\nLine <unverified>one</unverified>,\n"two"', run_id: 'run-1' }, 1: { ok: true, message: '-5 is a reply', run_id: 'run-2' } }) })
@@ -363,7 +374,7 @@ function sleeps(io: FakeIo): number[] {
 }
 
 describe('a run that stops partway with --csv', () => {
-  const FIELDS = 'Email,Subject,Message\r\n'
+  const FIELDS = '\uFEFFEmail,Subject,Message\r\n'
   const THREE = 'First.\n---\nSecond.\n---\nThird.'
 
   it('saves the emails that came back and says so on stderr', async () => {
@@ -436,7 +447,7 @@ describe('a rate limited email is tried once more', () => {
     const waits = sleeps(io)
     const r = await cli(io, 'sequence', write(io, 'q4.md', 'First.\n---\nSecond.'))
     expect([r.code, waits, bodies().length]).toEqual([6, [3000], 3])
-    expect(r.stderr).toContain('Email 2 was not improved (rate_limited)')
+    expect(r.stderr).toContain('Email 2 was not improved: Too many requests.')
     const down = await withKey({ optimizeRefusal: (i) => (i === 0 ? { status: 500, body: { error: { code: 'server_error', message: 'Down' } } } : undefined) })
     const more = sleeps(down)
     const d = await cli(down, 'sequence', write(down, 'q4.md', 'First.\n---\nSecond.'))
@@ -496,23 +507,21 @@ describe('writing a sequence', () => {
         'Written email 1 after 0 earlier.',
         '',
         'Email 2 of 3: Follow-up',
-        'Subject: Follow-up for {{company}}',
-        '',
         'Written email 2 after 1 earlier.',
         '',
         'Email 3 of 3: Last try',
-        'Subject: Last try for {{company}}',
-        '',
         'Written email 3 after 2 earlier.',
         '',
       ].join('\n')
     )
-    expect(r.stderr).toBe('')
+    expect(r.stderr).toBe('Run: run-1\nRun: run-2\nRun: run-3\nSent them? amdahl sent <run id> --provider <provider> --channel <channel> --sent-as returned --provider-send-id <id>\n')
     const rules = (k: number) => [
       `This sequence: ${goal}`,
       `This is email ${k} of 3: ${['Thanks', 'Follow-up', 'Last try'][k - 1]}. Its job: ${['thank them and pick up where you left off', 'a new reason to reply, not a bump', 'close politely and leave a way back in'][k - 1]}.`,
+      FIRST_NAME,
+      ...(k > 1 ? [`Email ${k} replies in the same thread as email 1, so it has no subject line.`, NO_DATE] : []),
     ]
-    const touch = (k: number) => ({ on: DAY, channel: 'email', summary: `Subject: ${['Thanks', 'Follow-up', 'Last try'][k - 1]} for {{company}}\n\nWritten email ${k} after ${k - 1} earlier.` })
+    const touch = (k: number) => ({ on: DAY, channel: 'email', summary: `${k === 1 ? 'Subject: Thanks for {{company}}\n\n' : ''}Written email ${k} after ${k - 1} earlier.` })
     expect(bodies()).toEqual([
       { message: '', channel: 'email', context: { rules: rules(1) } },
       { message: '', channel: 'email', context: { rules: rules(2), prior_touches: [touch(1)] } },
@@ -539,7 +548,7 @@ describe('writing a sequence', () => {
     expect(r.stdout).toContain('Email 3 of 3: Bye\n')
     expect(bodies()[1]?.context).toEqual({
       facts: ['We are Acme.'],
-      rules: ['This sequence: Book a meeting.', 'This is email 2 of 3: Proof. Its job: one result from a team like theirs.', 'No emojis.'],
+      rules: ['This sequence: Book a meeting.', 'This is email 2 of 3: Proof. Its job: one result from a team like theirs.', FIRST_NAME, 'Email 2 replies in the same thread as email 1, so it has no subject line.', NO_DATE, 'No emojis.'],
       prior_touches: [{ on: DAY, channel: 'email', summary: expect.stringContaining('Hello for') }],
     })
   })
@@ -558,7 +567,7 @@ describe('writing a sequence', () => {
     expect(await said('--write', 'Goal', '--emails', '7')).toEqual([2, 'Error: --emails must be a whole number from 2 to 6.'])
     expect(await said('--write', 'Goal', '--plan', one)).toEqual([2, `Error: ${one} has 1 line. A plan is 2 to 6 emails, one on each line.`])
     expect(await said('--write', 'Goal', '--plan', two, '--emails', '4')).toEqual([2, `Error: --emails 4 does not match the 2 emails in ${two}.`])
-    expect(await said('--write', 'Goal', '--context', rules)).toEqual([2, "Error: --context has 19 rules. With the plan's 2, Amdahl takes at most 20 for an email. Remove 1."])
+    expect(await said('--write', 'Goal', '--context', rules)).toEqual([2, "Error: --context has 19 rules. With the plan's 5, Amdahl takes at most 20 for an email. Remove 4."])
     expect(await said('--emails', '3')).toEqual([2, 'Error: --emails and --plan go with --write "<goal>".'])
     expect(await said(write(io, 'e.md', SEQ), '--write', 'Goal')).toEqual([2, 'Error: Give the emails to improve, or --write "<goal>", not both.'])
     expect(server?.log.filter((l) => l.path === OPTIMIZE)).toEqual([])
@@ -568,7 +577,7 @@ describe('writing a sequence', () => {
     const io = await withKey()
     io.stdinIsTTY = true
     io.stdoutIsTTY = true
-    io.answers = ['']
+    io.answers = ['', 'n']
     const r = await cli(io, 'sequence', '--write', 'Follow up with everyone who came to our event.', '--emails', '4')
     expect(r.code).toBe(0)
     expect(r.stderr).toBe(
@@ -579,9 +588,9 @@ describe('writing a sequence', () => {
         '  3. Proof: One result from a team like theirs',
         '  4. Last try: Close politely and leave a way back in',
         '',
-      ].join('\n') + 'To save them as a CSV: run the same command with --csv.\n'
+      ].join('\n') + 'Run: run-1\nRun: run-2\nRun: run-3\nRun: run-4\nSent them? amdahl sent <run id>\nTo save them as a CSV: run the same command with --csv.\n'
     )
-    expect(io.prompts).toEqual(['Write these 4 emails? [Y/n]'])
+    expect(io.prompts).toEqual(['Write these 4 emails? [Y/n]', `Save as ${join(io.cwd, 'sequence-amdahl.csv')}? [Y/n]`])
     expect(bodies()).toHaveLength(4)
   })
 
@@ -620,7 +629,7 @@ describe('with no file at a terminal', () => {
     expect(r.code).toBe(0)
     expect(io.prompts).toEqual([choice, 'Paste your emails, with a line of --- between them, then press Enter on an empty line:'])
     expect(r.stdout).toBe('Email 1 of 2\nBetter: First one.\n\nEmail 2 of 2\nBetter: Second one.\n')
-    expect(r.stderr).toBe('To save them as a CSV: amdahl sequence <file> --csv\n')
+    expect(r.stderr).toBe('Run: run-1\nRun: run-2\nSent them? amdahl sent <run id> --provider <provider> --channel <channel> --sent-as returned --provider-send-id <id>\nTo save them as a CSV: amdahl sequence <file> --csv\n')
   })
 
   it('nothing pasted sends nothing', async () => {
