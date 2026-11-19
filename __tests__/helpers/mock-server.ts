@@ -631,7 +631,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
       if (runRead && req.method === 'GET') {
         const found = runBodies.get((runRead[1] ?? '').toLowerCase())
         if (!found) return err(res, 404, 'not_found', 'No optimize run with this id from you in this workspace.')
-        return json(res, 200, { data: options.whatChanged && found.run_id === KNOWN_RUN ? { ...found, ...WHAT_CHANGED } : found })
+        return json(res, 200, { data: found })
       }
 
       // search.overview and search.fields (data:read).

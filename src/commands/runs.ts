@@ -8,13 +8,11 @@
 //
 // `amdahl run <id>`: one run, read from GET /messages/optimize/runs/:id
 // (`messages.get_run`): the draft the person sent and the message Amdahl
-// returned, one above the other, what Amdahl changed and why (when the read
-// returns it), and what the message left out. Only the person
+// returned, one above the other, and what the message left out. Only the person
 // who made a run can read it; anyone else's id, another workspace's and an
 // unknown id are the same not-found.
 
 import { amdahlCommand } from '../command-name'
-import { changeLines } from '../changes'
 import { apiClient, call, resolveCredential, str, type Ctx } from '../context'
 import { CliError, EXIT, usageError } from '../errors'
 import { currentOwner, findRun, otherOwnersRuns, recentRuns, type RunRecord } from '../history'
@@ -118,8 +116,6 @@ export function runLines(run: Record<string, unknown>, madeAsGrade = false): str
   const gradeNote = madeAsGrade ? ' (a grade writes no message)' : ''
   if (message && draft && message === draft) lines.push(`  The same as your draft: Amdahl changed nothing${gradeNote}.`)
   else lines.push(...(message ? wrap(message, 80, '  ') : [`  Amdahl wrote no message for this run${gradeNote}.`]))
-  const changes = madeAsGrade ? [] : changeLines(run)
-  if (changes.length > 0) lines.push('', ...changes)
   const omitted = records(run.omitted)
   if (omitted.length > 0) {
     lines.push('', 'Left out:')

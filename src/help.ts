@@ -73,7 +73,9 @@ With --json it prints the server's setup status as one object.
 
 Rewrite an outbound email or LinkedIn message. Each file is one message; "-"
 reads standard input. With no file, at a terminal, paste the message. It shows
-what Amdahl changed and why, sentence by sentence.
+what Amdahl changed and why, sentence by sentence. The reasons are documented
+in the cookbook, https://github.com/amdahlco/amdahl-cookbook, in
+prompts/agent-platform/optimize-reasons.md.
 
   --channel email|linkedin     What the message is. Left out, it is inferred.
   --evidence off|workspace     "workspace" also evaluates each claim against
@@ -283,10 +285,9 @@ ${GLOBAL}`,
   run: `Usage: amdahl run <run-id>
 
 Show one optimize run you made: your draft, then the message Amdahl returned,
-what it changed and why when the run says, what it left out and what context
-you sent. The id is the one amdahl optimize printed (amdahl runs lists the
-latest). Only you can open your own runs. A prompt run is read with amdahl
-prompt --run <id>.
+what it left out and what context you sent. The id is the one amdahl optimize
+printed (amdahl runs lists the latest). Only you can open your own runs. A
+prompt run is read with amdahl prompt --run <id>.
 ${GLOBAL}`,
 
   data: `Usage: amdahl data [--surface interactions|deals|deal_qualification]

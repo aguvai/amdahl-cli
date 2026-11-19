@@ -149,8 +149,9 @@ export function changeCell(result: Record<string, unknown> | null | undefined): 
     .map((row) => {
       if (!row.after) return `Cut "${row.before}"${row.cut || row.why ? `: ${row.cut || row.why}` : '.'}`
       if (!row.before) return `Added "${row.after}"${row.added || row.why ? `: ${row.added || row.why}` : '.'}`
-      const why = [row.added, row.cut].filter(Boolean).join(' ') || row.why
-      return `Changed "${row.before}" to "${row.after}"${why ? `: ${why}` : '.'}`
+      const labelled = [...(row.cut ? [`Cut: ${row.cut}`] : []), ...(row.added ? [`New: ${row.added}`] : [])].join(' ')
+      if (labelled) return `Changed "${row.before}" to "${row.after}". ${labelled}`
+      return `Changed "${row.before}" to "${row.after}"${row.why ? `: ${row.why}` : '.'}`
     })
     .join('\n')
 }
