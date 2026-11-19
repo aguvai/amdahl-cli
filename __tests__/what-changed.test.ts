@@ -88,6 +88,25 @@ describe('optimize shows what Amdahl changed', () => {
     }
   })
 
+  it('says a reason once, after the rows, when every change gives the same one', async () => {
+    const why = 'Rewritten to use your context.'
+    const changes = [
+      { before: 'We are the leading platform.', after: 'We help shippers stop overbilled charges.', why },
+      { before: 'Any time this week?', after: null, why },
+      { before: null, after: 'Worth 15 minutes on Tuesday?', why },
+    ]
+    const io = await withKey({ optimizeResult: { ...RESULT, changes } })
+    const r = await cli(io, 'optimize', write(io, 'draft.txt', 'Hi Dana.'))
+    expect(r.stderr.split('\n').slice(0, 6)).toEqual([
+      'What Amdahl changed:',
+      '  - "We are the leading platform."',
+      '  + "We help shippers stop overbilled charges."',
+      '  - "Any time this week?"',
+      '  + "Worth 15 minutes on Tuesday?"',
+      '  Why, for each change: Rewritten to use your context.',
+    ])
+  })
+
   it('--json passes changes and added_claims through as the server sent them', async () => {
     const io = await withKey({ whatChanged: true })
     const r = await cli(io, 'optimize', write(io, 'draft.txt', 'Hi Dana.'), '--json')

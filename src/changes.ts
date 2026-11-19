@@ -90,29 +90,34 @@ function note(label: string, text: string, width: number): string[] {
   return wrap(`${label}: ${text}`, width, '    ')
 }
 
-/** Rows as terminal lines under `header`, wrapped to `width`. Empty when there is nothing to show. */
+/** A row's reason lines, as label and text: Cut and New when the server split them, else the one reason. */
+function reasons(row: Change): [string, string][] {
+  if (row.before && row.after) {
+    if (row.cut || row.added) return [...(row.cut ? [['Cut', row.cut]] : []), ...(row.added ? [['New', row.added]] : [])] as [string, string][]
+    return row.why ? [['Why', row.why]] : []
+  }
+  if (row.before) return row.cut || row.why ? [['Cut', row.cut || row.why]] : []
+  return row.added || row.why ? [['New', row.added || row.why]] : []
+}
+
+/**
+ * Rows as terminal lines under `header`, wrapped to `width`. Empty when there is nothing to show.
+ * When every row gives the same one reason, it is said once after the rows, not under each.
+ */
 function blockLines(result: Record<string, unknown>, header: string, width: number): string[] {
   const shown = rows(result)
   if (shown.length === 0) return []
+  const texts = shown.map((row) => reasons(row).map(([, text]) => text))
+  const shared = shown.length > 1 && texts.every((t) => t.length === 1 && t[0] === texts[0]?.[0]) ? (texts[0]?.[0] ?? '') : ''
   const lines = [header]
   for (const row of shown) {
     if (row.before) lines.push(...marked('-', `"${row.before}"`, width))
     if (row.after) lines.push(...marked('+', `"${row.after}"`, width))
-    if (row.before && row.after) {
-      if (row.cut || row.added) {
-        if (row.cut) lines.push(...note('Cut', row.cut, width))
-        if (row.added) lines.push(...note('New', row.added, width))
-      } else if (row.why) lines.push(...note('Why', row.why, width))
-    } else if (row.before) {
-      const why = row.cut || row.why
-      if (why) lines.push(...note('Cut', why, width))
-    } else {
-      const why = row.added || row.why
-      if (why) lines.push(...note('New', why, width))
-    }
+    if (!shared) for (const [label, text] of reasons(row)) lines.push(...note(label, text, width))
     const source = row.after ? sourceText(result, row.after) : ''
     if (source) lines.push(...note('Source', source, width))
   }
+  if (shared) lines.push(...wrap(`Why, for each change: ${shared}`, width, '  '))
   return lines
 }
 
