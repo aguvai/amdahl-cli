@@ -296,7 +296,7 @@ function printRun(ctx: Ctx, file: string | undefined, started: Record<string, un
 /** `amdahl prompt <file|-> [--mode improve|grade] [--recipients <file.json|file.csv>] [--channel email|linkedin] [--context <file.json>] [--no-wait]`, `--run <id>`, or with no file at a terminal, three questions. */
 export async function prompt(ctx: Ctx, args: string[]): Promise<number> {
   const { io, out, flags } = ctx
-  const usage = `Usage: ${amdahlCommand('prompt <file|-> [--mode improve|grade] [--recipients <file.json>]')}`
+  const usage = `Usage: ${amdahlCommand('prompt <file|-> [--mode improve|grade] [--recipients <file.json|file.csv>]')}`
 
   // Read a run started earlier.
   const runId = str(flags.run)

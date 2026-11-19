@@ -10,6 +10,7 @@
 import { amdahlCommand } from './command-name'
 import type { Ctx } from './context'
 import { recipientFromLine } from './prompt-recipients'
+import { wrap } from './text'
 
 interface Starter {
   title: string
@@ -48,7 +49,7 @@ export const PROMPT_STARTERS: readonly Starter[] = [
 const MAX_TYPED = 6
 
 const PASTE = 'Paste my prompt'
-const TYPED_QUESTION = 'Type up to 6 companies, one per line:\n  Company\n  Company, Name\n  Company, Name, what you know about them\nThen press Enter on an empty line:'
+const TYPED_QUESTION = 'Type up to 6 companies, one per line:\n  Company\n  Company | Name\n  Company | Name | what you know about them\nThen press Enter on an empty line:'
 
 /** What flags already answered: recipients from a file, and the mode named. */
 export interface Skip {
@@ -134,10 +135,15 @@ async function askCompanies(ctx: Ctx): Promise<Record<string, unknown>[] | undef
   }
 }
 
-/** How to run the same thing without the questions. */
+/**
+ * How to run the same thing without the questions. The CLI writes no file of its own, so
+ * this says how to save the prompt and the typed companies, then gives the command.
+ */
 export function nextTimeLine(answers: GuidedAnswers, skip: Skip): string {
   const parts = ['prompt prompt.md']
-  if (answers.recipients && !skip.recipients) parts.push('--recipients recipients.csv')
+  const typed = Boolean(answers.recipients && !skip.recipients)
+  if (typed) parts.push('--recipients recipients.csv')
   if (answers.mode === 'grade' && !skip.mode) parts.push('--mode grade')
-  return `Next time: ${amdahlCommand(parts.join(' '))}`
+  const save = typed ? 'the prompt as prompt.md and the companies as recipients.csv (columns company, name, notes)' : 'the prompt as prompt.md'
+  return `${wrap(`Next time, save ${save}, then run:`).join('\n')}\n  ${amdahlCommand(parts.join(' '))}`
 }

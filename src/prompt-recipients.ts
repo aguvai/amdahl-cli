@@ -9,6 +9,7 @@
 // notes when there is no notes column.
 
 import { usageError } from './errors'
+import { cutAtWord } from './text'
 import { csvDelimiter, parseCsv } from './commands/batch'
 
 const COMPANY = ['company', 'company_name', 'account', 'account_name', 'organization', 'organisation', 'organization_name']
@@ -18,12 +19,15 @@ const LAST = ['last_name', 'lastname', 'last', 'surname', 'family_name', 'contac
 const NOTES = ['notes', 'recipient_notes', 'note']
 const TITLE = ['title', 'job_title', 'position', 'role', 'person_title', 'headline']
 
+/** The server's cap on a label (amdahl-app messages/_promptRecipients.ts, MAX_LABEL_CHARS). */
+const MAX_LABEL_CHARS = 200
+
 /** One recipient as the API takes it. */
 export function recipientItem(company: string, name: string, notes: string): Record<string, unknown> {
   return {
     recipient: { company, ...(name ? { name } : {}) },
     ...(notes ? { recipient_notes: notes } : {}),
-    label: name ? `${name}, ${company}` : company,
+    label: cutAtWord(name ? `${name}, ${company}` : company, MAX_LABEL_CHARS),
   }
 }
 
@@ -62,9 +66,12 @@ export function recipientsFromCsv(path: string, text: string): Record<string, un
   })
 }
 
-/** One typed line: `Company`, `Company, Name` or `Company, Name, what you know about them`. Null for a line with no company. */
+/**
+ * One typed line: `Company`, `Company | Name` or `Company | Name | what you know about them`; a tab
+ * also splits. A line with neither is the company alone, commas and all. Null for no company.
+ */
 export function recipientFromLine(line: string): Record<string, unknown> | null {
-  const [company = '', name = '', ...rest] = line.split(',').map((part) => part.trim())
+  const [company = '', name = '', ...rest] = line.split(/\s*[|\t]\s*/).map((part) => part.trim())
   if (!company) return null
-  return recipientItem(company, name, rest.filter(Boolean).join(', '))
+  return recipientItem(company, name, rest.filter(Boolean).join(' | '))
 }

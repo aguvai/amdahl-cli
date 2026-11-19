@@ -30,17 +30,23 @@ const write = (io: FakeIo, name: string, text: string) => {
 }
 const PROMPT = 'Write a short email to book a call.\nUnder 80 words.'
 
+const NEXT_TIME_TYPED = [
+  'Next time, save the prompt as prompt.md and the companies as recipients.csv',
+  '(columns company, name, notes), then run:',
+  '  amdahl prompt prompt.md --recipients recipients.csv',
+]
+
 describe('bare amdahl prompt at a terminal', () => {
   it('asks three steps, sends what was answered, and says how to skip the questions next time', async () => {
     const io = await signedIn()
-    io.answers.push('1', PROMPT, '2', 'Helix\nNorthwind, Sam Ito\nKiln, Ana Costa, Hiring 6 reps', '1')
+    io.answers.push('1', PROMPT, '2', 'Helix\nNorthwind | Sam Ito\nKiln | Ana Costa | Hiring 6 reps', '1')
     const r = await cli(io, 'prompt')
     expect(r.code).toBe(0)
     expect(io.prompts).toEqual([
       'Where does the prompt come from? [Paste my prompt | New signup: Book a call after signup | Pricing page visit: Catch them comparing | Funding or hiring: Open with the news | Champion moved: Reach them at the new job]',
       'Paste the prompt, then press Enter on an empty line:',
       'Which companies should the emails be written for? [Let Amdahl pick up to 6 accounts from your workspace | Type the companies]',
-      'Type up to 6 companies, one per line:\n  Company\n  Company, Name\n  Company, Name, what you know about them\nThen press Enter on an empty line:',
+      'Type up to 6 companies, one per line:\n  Company\n  Company | Name\n  Company | Name | what you know about them\nThen press Enter on an empty line:',
       'What should Amdahl do? [Improve it | Grade it]',
     ])
     expect(bodies()).toEqual([
@@ -57,7 +63,7 @@ describe('bare amdahl prompt at a terminal', () => {
     expect(r.stderr).toContain('Step 1 of 3: your prompt\n')
     expect(r.stderr).toContain('Step 2 of 3: who to test it on\n')
     expect(r.stderr).toContain('Step 3 of 3: what to do with it\n')
-    expect(r.stderr.trimEnd().split('\n').at(-1)).toBe('Next time: amdahl prompt prompt.md --recipients recipients.csv')
+    expect(r.stderr.trimEnd().split('\n').slice(-3)).toEqual(NEXT_TIME_TYPED)
   })
 
   it('a starter is sent as the console has it, and no recipients means Amdahl picks', async () => {
@@ -71,7 +77,7 @@ describe('bare amdahl prompt at a terminal', () => {
     expect(body).not.toHaveProperty('recipients')
     expect(body.mode).toBe('grade')
     expect(r.stderr).toContain('Pricing page visit:\nAn agent runs this when')
-    expect(r.stderr.trimEnd().split('\n').at(-1)).toBe('Next time: amdahl prompt prompt.md --mode grade')
+    expect(r.stderr.trimEnd().split('\n').slice(-2)).toEqual(['Next time, save the prompt as prompt.md, then run:', '  amdahl prompt prompt.md --mode grade'])
   })
 
   it('an empty paste sends nothing and exits 0 with one line', async () => {
@@ -100,6 +106,18 @@ describe('bare amdahl prompt at a terminal', () => {
     expect(r.code).toBe(0)
     expect(r.stderr).toContain('Nothing was sent.')
     expect(bodies()).toEqual([])
+  })
+
+  it('a company with a comma stays whole, a bar or a tab splits, and a long label is cut to the server cap', async () => {
+    const io = await signedIn()
+    const long = `${'Long company name '.repeat(14)}Inc`
+    io.answers.push('1', PROMPT, '2', `Acme, Inc.\nKiln\tAna Costa\tHiring, fast\n${long} | Sam Ito`, '2')
+    const r = await cli(io, 'prompt')
+    expect(r.code).toBe(0)
+    const recipients = bodies()[0].recipients as { recipient: Record<string, string>; recipient_notes?: string; label: string }[]
+    expect(recipients[0]).toEqual({ recipient: { company: 'Acme, Inc.' }, label: 'Acme, Inc.' })
+    expect(recipients[1]).toEqual({ recipient: { company: 'Kiln', name: 'Ana Costa' }, recipient_notes: 'Hiring, fast', label: 'Ana Costa, Kiln' })
+    expect(recipients[2]?.label.length).toBeLessThanOrEqual(200)
   })
 
   it('more than 6 typed companies is asked again, with the limit named', async () => {
