@@ -89,7 +89,7 @@ describe('amdahl feedback --rating', () => {
 })
 
 describe('a browser sign-in', () => {
-  it('cannot rate yet: the command says so and sends nothing, and the optimize prompt never asks', async () => {
+  it('is sent, and the server refusing it (403 credential_not_allowed) becomes the needs-a-key sentence', async () => {
     server = await startMockServer({})
     const io = fakeIo({ AMDAHL_API_URL: server.url, AMDAHL_FEEDBACK_PROMPT: '1' })
     expect((await cli(io, 'login', '--json')).code).toBe(0)
@@ -98,18 +98,12 @@ describe('a browser sign-in', () => {
     expect(r.code).toBe(4)
     expect(r.stderr).toContain('A rating needs an API key for now.')
     expect(r.stderr).toContain('amdahl keys create')
+    expect(server.log.filter((l) => l.path === '/api/platform/v1/feedback')).toHaveLength(1)
     writeFileSync(join(io.homedir, 'a.md'), 'draft')
     io.answers.push('y')
-    expect((await cli(io, 'optimize', join(io.homedir, 'a.md'))).code).toBe(0)
-    expect(io.prompts.filter((p) => p.startsWith('Was this useful?'))).toEqual([])
-    expect(ratings()).toEqual([])
-  })
-
-  it('an access token in AMDAHL_ACCESS_TOKEN is refused the same way', async () => {
-    server = await startMockServer({})
-    const io = fakeIo({ AMDAHL_API_URL: server.url, AMDAHL_ACCESS_TOKEN: 'sometoken' })
-    expect((await cli(io, 'feedback', KNOWN_RUN, '--rating', 'up')).code).toBe(4)
-    expect(ratings()).toEqual([])
+    const o = await cli(io, 'optimize', join(io.homedir, 'a.md'))
+    expect(o.code).toBe(0)
+    expect(o.stderr).toContain('Could not save your rating: A rating needs an API key for now.')
   })
 })
 
@@ -160,6 +154,7 @@ describe('the "Was this useful?" line', () => {
     io.answers.push(null)
     const r = await cli(io, 'optimize', join(io.homedir, 'a.md'))
     expect(r.code).toBe(0)
+    expect(r.stderr).not.toContain('Could not save')
     expect(ratings()).toEqual([])
   })
 

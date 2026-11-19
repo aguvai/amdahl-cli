@@ -8,6 +8,7 @@
 
 import { apiClient, call, toCliError, type Credential, type Ctx } from './context'
 import { CliError, EXIT } from './errors'
+import { PromptCancelled } from './io'
 import { feedbackPromptOn } from './config'
 import { canAsk } from './terminal'
 import { VERSION } from './version'
@@ -24,15 +25,10 @@ export const MAX_RATING_COMMENT_CHARS = 2_000
 export const RATING_TIMEOUT_MS = 10_000
 
 /**
- * The server takes a rating from the console and from an API key, and refuses a CLI sign-in or an
- * access token (403 `credential_not_allowed`) until it accepts the CLI's own OAuth client. Only a key
- * can send one now; a refusal here says so before anything is asked or sent.
+ * What a CLI sign-in is told when the server refuses it (403 `credential_not_allowed`): until the
+ * server takes the CLI's own OAuth client, only an API key can rate. The request is always sent, so a
+ * server that accepts the sign-in needs no new CLI.
  */
-export function canRate(credential: Credential): boolean {
-  return credential.source !== 'profile' && credential.source !== 'env:AMDAHL_ACCESS_TOKEN'
-}
-
-/** The error a sign-in gets when it tries to rate. */
 export function ratingNeedsKey(): CliError {
   return new CliError(
     'credential_not_allowed',
@@ -64,9 +60,14 @@ export async function postRating(ctx: Ctx, credential: Credential, input: Rating
   }
   if (input.comment?.trim()) body.comment = input.comment
   if (input.emailOk !== undefined) body.email_ok = input.emailOk
-  return call(() =>
-    apiClient(ctx, credential).request<Record<string, unknown>>('/api/platform/v1/feedback', { method: 'POST', body, signal: AbortSignal.timeout(RATING_TIMEOUT_MS) })
-  )
+  try {
+    return await call(() =>
+      apiClient(ctx, credential).request<Record<string, unknown>>('/api/platform/v1/feedback', { method: 'POST', body, signal: AbortSignal.timeout(RATING_TIMEOUT_MS) })
+    )
+  } catch (err) {
+    if (err instanceof CliError && err.code === 'credential_not_allowed') throw ratingNeedsKey()
+    throw err
+  }
 }
 
 /** What the one-line prompt reads: y, yes, up (a thumbs up) or n, no, down (a thumbs down). */
@@ -84,7 +85,7 @@ export function ratingFromAnswer(answer: string): Rating | null {
  * line and never changes the command's exit code: the result was already printed.
  */
 export async function askRating(ctx: Ctx, credential: Credential, target: { id: string; surface: RatingSurface }): Promise<void> {
-  if (!feedbackPromptOn(ctx.io, ctx.config) || !canAsk(ctx) || !target.id || !canRate(credential)) return
+  if (!feedbackPromptOn(ctx.io, ctx.config) || !canAsk(ctx) || !target.id) return
   try {
     const rating = ratingFromAnswer(await ctx.io.prompt('Was this useful? [y/n, Enter to skip] '))
     if (!rating) return
@@ -92,6 +93,7 @@ export async function askRating(ctx: Ctx, credential: Credential, target: { id: 
     await postRating(ctx, credential, { id: target.id, surface: target.surface, rating, ...(comment ? { comment: comment.slice(0, MAX_RATING_COMMENT_CHARS) } : {}) })
     ctx.io.stderr('Thanks, saved.\n')
   } catch (err) {
+    if (err instanceof PromptCancelled) return
     ctx.io.stderr(`Could not save your rating: ${toCliError(err).message}\n`)
   }
 }

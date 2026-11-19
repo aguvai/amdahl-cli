@@ -815,8 +815,8 @@ amdahl feedback <query-id> --rating up --surface search
 ```
 
 `--rating up|down` sends a thumbs up or down on something Amdahl returned
-(`POST /feedback`), as the owner of your API key. It needs a key for now: a
-browser sign-in cannot send a rating yet, and says so before anything is sent. It goes to the Amdahl
+(`POST /feedback`), as the owner of your API key. Until the server
+accepts a browser sign-in, a rating needs an API key, and a sign-in is told so. It goes to the Amdahl
 team with the comment you typed, and never the message or the question. The id
 is the optimize run id `amdahl optimize` printed, or the `query_id` of a search
 (`--surface search`) or a research id (`--surface research`), both UUIDs. The
@@ -827,7 +827,7 @@ or `--sent-text`, which say what happened to a message: run the command once
 for each.
 
 To be asked "Was this useful?" after each optimize or search result at a
-terminal with an API key, set `"feedbackPrompt": true` in `config.json`, or
+terminal, set `"feedbackPrompt": true` in `config.json`, or
 `AMDAHL_FEEDBACK_PROMPT=1` (`0` turns it off). It is off by default, asks nothing with `--json`, in CI, in an agent or
 with `AMDAHL_NO_PROMPT=1`, and Enter skips it. A no asks what went wrong.
 

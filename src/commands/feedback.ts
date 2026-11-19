@@ -26,7 +26,7 @@ import { apiClient, call, resolveCredential, str, type Ctx } from '../context'
 import { EXIT, usageError } from '../errors'
 import { readTextFile } from '../files'
 import { findRun } from '../history'
-import { canRate, postRating, RATING_SURFACES, RATINGS, ratingNeedsKey, type Rating, type RatingSurface } from '../rating'
+import { postRating, RATING_SURFACES, RATINGS, type Rating, type RatingSurface } from '../rating'
 import { SEND_TO_PRESETS } from '../send-to'
 import { atTerminal, canAsk } from '../terminal'
 import { clip, field, records } from '../text'
@@ -219,7 +219,6 @@ async function rate(ctx: Ctx, args: string[]): Promise<number> {
   if (ctx.flags['email-ok'] === true && ctx.flags['no-email-ok'] === true) throw usageError('Give --email-ok or --no-email-ok, not both.', usage)
   const comment = text('comment', str(ctx.flags.comment), MAX_COMMENT_CHARS)
   const credential = await resolveCredential(ctx)
-  if (!canRate(credential)) throw ratingNeedsKey()
   const result = await postRating(ctx, credential, { id, surface, rating, comment, emailOk: ctx.flags['email-ok'] === true ? true : ctx.flags['no-email-ok'] === true ? false : undefined })
   const mail = result.email_ok === true ? ' Amdahl may email you about it.' : ''
   ctx.out.result({ ...result, ok: true }, `Rating saved for ${id}.${mail}`)
