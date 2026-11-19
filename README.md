@@ -773,7 +773,7 @@ Import file for lemlist: drafts-lemlist.csv
 
 - **Tools:** `instantly`, `smartlead`, `lemlist`, `heyreach`, `reply_io`,
   `apollo`, `outreach`, `salesloft`, `hubspot`, `lgm` (La Growth Machine),
-  `woodpecker`, and `other` for any tool with a CSV import. Gmail and Outlook
+  `woodpecker`, `amplemarket`, and `other` for any tool with a CSV import. Gmail and Outlook
   send from a mailbox, so they have no import file.
 - **Channel:** a file is for one channel. A tool that takes one channel needs no
   flag: HeyReach and La Growth Machine are LinkedIn, and the rest are email,
@@ -929,7 +929,7 @@ stores two.
 `reported_via: cli`. The flags are the report's fields: `--provider`
 (`lemlist`, `instantly`, `outreach`, `salesloft`, `hubspot`, `salesforce`,
 `gmail`, `heyreach`, `apollo`, `smartlead`, `reply_io`, `lgm`, `woodpecker`,
-`linkedin_manual`, `other`; the server's list, so use `other` for a sender that
+`amplemarket`, `linkedin_manual`, `other`; the server's list, so use `other` for a sender that
 is not on it), `--channel` (`email`,
 `linkedin_invite`, `linkedin_message`, `linkedin_inmail`; `linkedin` is
 accepted and means `linkedin_message`, as in `amdahl optimize --channel`),

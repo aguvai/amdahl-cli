@@ -109,6 +109,12 @@ export interface MockOptions {
   noConnections?: boolean
   /** Answer setup/status with an optimize blocker (and the quota used up for quota_exhausted). */
   blocker?: 'missing_scope' | 'role_too_low' | 'quota_exhausted'
+  /** The scopes /me/context answers and a research request needs `conversations:write` from (default: the usual set, and an API key can research). */
+  scopes?: string[]
+  /** Answer /me/context with a 500. */
+  failMeContext?: boolean
+  /** Refuse every research request with the server's "ran search instead" note, though /me/context lists `conversations:write`. */
+  researchRefused?: boolean
   /** The search/query result body (inside `data`); the default is two rows and a cited answer. */
   searchResult?: Record<string, unknown>
   /** Research reads that answer `running` before the job completes. */
@@ -133,7 +139,11 @@ export interface MockOptions {
    */
   /** `GET /search/suggestions` never answers (a hanging server). */
   suggestionsHang?: boolean
-  suggestions?: { for_you?: Record<string, unknown>[]; library?: Record<string, unknown>[]; generated_at?: string; setup_needed?: Record<string, unknown> }
+  suggestions?: { for_you?: Record<string, unknown>[]; library?: Record<string, unknown>[]; generated_at?: string; setup_needed?: Record<string, unknown>; hidden_recipe_ids?: string[] }
+  /** The first n suggestions reads answer `pending: true` with an empty For you (the server still working it out). */
+  suggestionsPendingReads?: number
+  /** A key's search without `route: "research"` is handed to research by the server: this is its `routing`, and the answer carries a `query_id`. */
+  routedResearch?: Record<string, unknown>
   /** setup/status's `free_usage` (a self-serve workspace on its free credit). */
   freeUsage?: Record<string, unknown>
   /** optimize_prompt refuses with this message (a 422), as the server does with no recipients on an empty workspace. */
@@ -195,6 +205,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
   // Sends already reported, by run and send key.
   const reports = new Map<string, number>()
   let researchReads = 0
+  let suggestionReads = 0
   let workspaceCreated = false
   let refusals = 0
   const codes = new Map<string, { challenge: string; redirectUri: string }>()
@@ -357,10 +368,11 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
       }
 
       if (path === '/api/platform/v1/me/context') {
+        if (options.failMeContext) return err(res, 500, 'internal_error')
         return json(res, 200, {
           user_id: USER,
           business_id: BIZ,
-          scopes: ['data:read', 'connections:read', 'messages:execute'],
+          scopes: options.scopes ?? ['data:read', 'connections:read', 'messages:execute'],
           auth_method: kind,
           email: 'dev@example.com',
           workspace: { id: BIZ, name: options.workspaceName ?? 'Acme', slug: 'acme' },
@@ -393,8 +405,22 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
         const input = JSON.parse(body) as { query?: string; route?: string }
         const problem = searchProblem(input, options.suggestions ? (options.suggestions.library ?? SUGGESTED_LIBRARY).map((r) => String(r.id)) : null)
         if (problem) return json(res, 400, { data: { success: false, error: { code: 'invalid_argument', message: problem } } })
+        const canResearch = kind === 'api_key' && !options.researchRefused && (options.scopes ? options.scopes.includes('conversations:write') : true)
+        if (options.routedResearch && input.route !== 'research' && canResearch) {
+          return json(res, 200, {
+            data: {
+              success: true,
+              mode_ran: 'research',
+              results: [],
+              timing: { total_ms: 5 },
+              query_id: '77777777-7777-4777-8777-777777777777',
+              routing: options.routedResearch,
+              research: { research_id: '66666666-6666-4666-8666-666666666666', chat_id: 'chat1', status: 'running', poll: 'Poll GET /research/:id' },
+            },
+          })
+        }
         if (input.route === 'research') {
-          if (kind === 'api_key') {
+          if (canResearch) {
             return json(res, 200, {
               data: {
                 success: true,
@@ -407,7 +433,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
             })
           }
           return json(res, 200, {
-            data: options.searchResult ?? {
+            data: (options.researchRefused && options.searchResult ? { ...options.searchResult, notes: ['Starting a research job for this ask needs a credential that can start one (conversations:write); ran search instead.'] } : null) ?? options.searchResult ?? {
               success: true,
               mode_ran: 'fuzzy',
               results: [{ id: 'r1', title: 'Discovery call', speaker: 'Dana', occurred_at: '2026-10-01T10:00:00Z', text: 'Pricing came up twice.' }],
@@ -642,6 +668,8 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
       if (path === '/api/platform/v1/search/suggestions' && req.method === 'GET') {
         if (options.suggestionsHang) return
         if (!options.suggestions) return err(res, 404, 'not_found', 'No such route.')
+        suggestionReads++
+        if (suggestionReads <= (options.suggestionsPendingReads ?? 0)) return json(res, 200, { data: { for_you: [], library: SUGGESTED_LIBRARY, generated_at: '2026-11-13T22:40:02.728Z', pending: true } })
         return json(res, 200, { data: { for_you: [], library: SUGGESTED_LIBRARY, generated_at: '2026-11-13T22:40:02.728Z', ...options.suggestions } })
       }
       if (path === '/api/platform/v1/search/overview' && req.method === 'GET') {

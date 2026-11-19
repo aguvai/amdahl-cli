@@ -99,8 +99,8 @@ prompts/agent-platform/optimize-reasons.md.
                                drafts-lemlist.csv), then print how to import it.
                                Tools: instantly, smartlead, lemlist, heyreach,
                                reply_io, apollo, outreach, salesloft, hubspot,
-                               lgm, woodpecker, or other (any tool that imports
-                               a CSV).
+                               lgm, woodpecker, amplemarket, or other (any tool
+                               that imports a CSV).
   --force                      Replace a results file that already exists.
 
 In the results CSV, a cell that starts with =, +, - or @ gets a ' in front, so
@@ -220,6 +220,10 @@ with the rows it came from.
                 Search prints the id when a job starts. It needs a key that
                 can read research, the one that started the job.
 
+Amdahl starts research by itself when a question needs it, and says why first.
+When it only offers research, at a terminal with a Customer agent key it asks
+once. Otherwise it prints the command: add --research.
+
 With no rows it says why, in the server's words. A search the server cut at its
 deadline says it ran out of time and exits 1; add --research, which can run
 longer. With --json it prints the server's whole answer, every row included.
@@ -247,14 +251,22 @@ predict replies. With --json it prints {"ok", "file", "result"}: the grade is
 ${GLOBAL}`,
 
   prompt: `Usage: amdahl prompt <file|-> [--mode improve|grade]
-                     [--recipients <file.json>] [--channel email|linkedin]
-                     [--context <file.json>] [--no-wait]
+                     [--recipients <file.json|file.csv>]
+                     [--channel email|linkedin] [--context <file.json>]
+                     [--no-wait]
        amdahl prompt --run <id> [--no-wait]
+       amdahl prompt          (at a terminal: three steps, no file needed)
 
 Grade or improve a reusable prompt (the instructions a writer follows to write
 an outbound email to any recipient) by the emails it writes. It starts a run
 that takes a few minutes, prints the run id and waits. One message, not a
 prompt, is for amdahl optimize.
+
+With no file, at a terminal, amdahl prompt walks through three steps: 1 your
+prompt (paste it, or start from an example), 2 who to test it on (up to 6
+companies you type, or none and Amdahl picks from your workspace), 3 Improve
+or Grade. It ends by showing the command that skips the questions next time.
+An agent, CI, a pipe, --json and AMDAHL_NO_PROMPT=1 get no questions.
 
   --mode improve|grade  improve (the default) revises the prompt and returns it
                         only when the revision wrote better email on recipients
@@ -263,8 +275,10 @@ prompt, is for amdahl optimize.
   --recipients <file>   1 to 6 sample recipients as JSON: [{"recipient":
                         {"company": "Helix"}, "recipient_notes": "..."}]. Each
                         may have name, company, email, domain, linkedin_url and
-                        attributes. Improve needs 2 or more. Left out, Amdahl
-                        picks up to 6 of your workspace's accounts.
+                        attributes. Or a .csv with a header row: company
+                        (required), name and notes. Improve needs 2 or more.
+                        Left out, Amdahl picks up to 6 of your workspace's
+                        accounts.
   --channel email|linkedin  What the emails are.
   --context <file.json>     Your rules, facts and voice_examples, as JSON.
   --no-wait             Start the run, print its id and stop.
@@ -312,7 +326,9 @@ ${GLOBAL}`,
 
 List the console's recipe library: the questions it asks as a search, by
 category, with what each reads and the fill-in it needs. "For you" above it
-shows up to four that suit this workspace now, each with why. Run one with
+shows up to four that suit this workspace now, each with why; one hidden in the
+console is left out, and at a terminal it waits a few seconds for a list still
+being made. Run one with
 amdahl search --recipe <id>. With --json it prints every recipe with its
 question and fill-ins, and for_you. Where the server's list cannot be read, it
 lists the copy bundled in this version.

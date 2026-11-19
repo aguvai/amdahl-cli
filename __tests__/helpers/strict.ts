@@ -133,7 +133,7 @@ export function feedbackProblem(input: unknown): string | null {
 // ── messages.report_send: messages/_reportSendSchema.ts, messageOptimizer/sendReports ────────
 
 // The server's send providers (2026-11-13).
-export const SEND_PROVIDERS = ['lemlist', 'instantly', 'outreach', 'salesloft', 'hubspot', 'salesforce', 'gmail', 'heyreach', 'apollo', 'smartlead', 'reply_io', 'lgm', 'woodpecker', 'linkedin_manual', 'other']
+export const SEND_PROVIDERS = ['lemlist', 'instantly', 'outreach', 'salesloft', 'hubspot', 'salesforce', 'gmail', 'heyreach', 'apollo', 'smartlead', 'reply_io', 'lgm', 'woodpecker', 'amplemarket', 'linkedin_manual', 'other']
 export const SEND_CHANNELS = ['email', 'linkedin_invite', 'linkedin_message', 'linkedin_inmail']
 const REPORT_KEYS = ['run_id', 'provider', 'channel', 'sent_as', 'sent_at', 'provider_send_id', 'provider_campaign_id', 'sequence_step', 'provider_variant_id', 'provider_lead_id', 'thread_id', 'recipient', 'recipient_key_hash', 'sent_text']
 const TEXT_LIMITS: Record<string, number> = { provider_send_id: 256, provider_campaign_id: 256, provider_variant_id: 256, provider_lead_id: 256, thread_id: 512, recipient: 512, sent_text: 10_000 }
@@ -226,6 +226,8 @@ export function searchProblem(input: unknown, recipeIds: string[] | null = null)
   if (input.query !== undefined && (typeof input.query !== 'string' || input.query.length > 10_000)) return 'Invalid search request: query: String must contain at most 10000 character(s)'
   if (input.limit !== undefined && (!Number.isInteger(input.limit) || (input.limit as number) < 1)) return 'Invalid search request: limit: Number must be greater than 0'
   if (input.route !== undefined && !['auto', 'search', 'research'].includes(String(input.route))) return 'Invalid search request: route: Invalid enum value'
+  // search/query.ts: `from_query_id` is a uuid (the query_id of the answer whose research offer was taken).
+  if (input.from_query_id !== undefined && (typeof input.from_query_id !== 'string' || !UUID.test(input.from_query_id))) return 'Invalid search request: from_query_id: Invalid uuid'
   if (input.answer !== undefined && typeof input.answer !== 'boolean') return 'Invalid search request: answer: Expected boolean'
   if (!(typeof input.query === 'string' && input.query.trim())) return 'Provide a `query`, `filters`, or a `group_by`+`metrics` aggregation: an empty request has nothing to run.'
   return null
@@ -295,6 +297,8 @@ export function promptProblems(input: unknown): string[] {
         const at = `$.recipients[${i}]`
         if (!isObject(item)) return void errors.push(`${at}: Expected object`)
         errors.push(...unknownKeys(at, item, RECIPIENT_ITEM_KEYS))
+        // messages/_promptRecipients.ts: label is trimmed, 1 to MAX_LABEL_CHARS (200).
+        if (item.label !== undefined && (typeof item.label !== 'string' || !item.label.trim() || item.label.trim().length > 200)) errors.push(`${at}.label: String must contain 1 to 200 character(s)`)
         if (!isObject(item.recipient) || Object.keys(item.recipient).length === 0) errors.push(`${at}.recipient: name a person or a company`)
       })
     }
