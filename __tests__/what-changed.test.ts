@@ -57,15 +57,19 @@ const RESULT = {
 }
 
 describe('optimize shows what Amdahl changed', () => {
-  it('prints the block after the message on stderr, and drops the two lines it repeats', async () => {
+  it('prints the block after the message on stderr, drops the rewrite line it repeats, and keeps the removed-claims line', async () => {
     const io = await withKey({ optimizeResult: { ...RESULT, ...WHAT_CHANGED } })
     const r = await cli(io, 'optimize', write(io, 'draft.txt', 'Hi Dana.'))
     expect(r.code).toBe(0)
     expect(r.stdout).toBe('Hi Dana, Helix cut tickets by 70%.\n')
-    expect(r.stderr.split('\n').slice(0, BLOCK.length + 2)).toEqual([...BLOCK, 'Checked every claim against your calls.', 'Left out 1 thing: The context held one.'])
+    expect(r.stderr.split('\n').slice(0, BLOCK.length + 3)).toEqual([
+      ...BLOCK,
+      'Checked every claim against your calls.',
+      "Removed 2 claims your calls don't back.",
+      'Left out 1 thing: The context held one.',
+    ])
     expect(r.stderr).toContain('\nRun: r1\n')
     expect(r.stderr).not.toContain('Rewrote')
-    expect(r.stderr).not.toContain('Removed')
     fits80(r.stderr.split('\n').slice(0, BLOCK.length).join('\n'))
   })
 
@@ -114,21 +118,13 @@ describe('optimize shows what Amdahl changed', () => {
   })
 })
 
-describe('run shows what Amdahl changed', () => {
-  it('prints the block after the message when the read returns changes, and nothing extra when it does not', async () => {
+describe('run reads a stored run', () => {
+  it('shows no changes block and its help promises none: the run read (getRun.ts) never returns changes', async () => {
     const io = await withKey({ whatChanged: true })
     const r = await cli(io, 'run', KNOWN_RUN)
     expect(r.code).toBe(0)
-    const lines = r.stdout.split('\n')
-    const at = lines.indexOf('What Amdahl changed:')
-    expect(lines.slice(at, at + BLOCK.length)).toEqual(BLOCK)
-    expect(lines[at - 1]).toBe('')
-    expect(lines[at - 2]).toBe('  Hi Dana, Helix cut provisioning tickets by 70%. Worth 15 minutes?')
-    expect(lines[at + BLOCK.length]).toBe('')
-    expect(lines[at + BLOCK.length + 1]).toBe('Left out:')
-
-    const old = await withKey()
-    expect((await cli(old, 'run', KNOWN_RUN)).stdout).not.toContain('What Amdahl changed')
+    expect(r.stdout).not.toContain('What Amdahl changed')
+    expect((await cli(io, 'run', '--help')).stdout).not.toContain('what it changed and why')
   })
 })
 
@@ -144,7 +140,7 @@ describe('optimize --list adds an amdahl_changes column', () => {
         'Cut "We are the leading onboarding platform.": nothing in your calls backs it.',
         'Added "Helix cut provisioning tickets by 70% in one quarter.": it gives proof from a team like theirs.',
         'Changed "Quick note about pricing." to "Quick note on pricing for Helix.": Names the company.',
-        'Changed "Can we talk?" to "Worth 15 minutes?": it asks for 15 minutes. it did not say how long.',
+        'Changed "Can we talk?" to "Worth 15 minutes?". Cut: it did not say how long. New: it asks for 15 minutes.',
       ].join('\n')
     )
 

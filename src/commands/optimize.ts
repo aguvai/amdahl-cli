@@ -7,8 +7,9 @@
 // command exits 1. Without `--json`, the message goes to stdout and the
 // summary and up to three lines on what Amdahl did go to stderr, then the run
 // id. When the result carries `changes`, a "What Amdahl changed" block (see
-// changes.ts) follows the message and replaces the two lines on what Amdahl
-// did that it repeats. A message that still fails a hard rule (`incomplete`, `failed_rules`)
+// changes.ts) follows the message and replaces the line on rewritten and cut
+// sentences that it repeats. The line on removed claims stays: a removed claim
+// may have no row. A message that still fails a hard rule (`incomplete`, `failed_rules`)
 // has a warning line on stderr just before it, naming the rules. A feedback link to the run's internal page follows only for Amdahl staff
 // who turn it on (`feedbackLink` in the config, or AMDAHL_FEEDBACK_LINK=1).
 //
@@ -234,7 +235,7 @@ export function whatAmdahlDid(result: Record<string, unknown>, withChanges = fal
   // In print order, each with its rank: 1 is kept first.
   const lines = [
     { rank: 5, line: checked },
-    { rank: 3, line: withChanges ? '' : removed },
+    { rank: 3, line: removed },
     { rank: 6, line: usedLine },
     { rank: 7, line: withChanges ? '' : steps.did },
     { rank: 4, line: leftOut },
