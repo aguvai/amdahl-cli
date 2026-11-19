@@ -94,6 +94,7 @@ export async function askRating(ctx: Ctx, credential: Credential, target: { id: 
     ctx.io.stderr('Thanks, saved.\n')
   } catch (err) {
     if (err instanceof PromptCancelled) return
-    ctx.io.stderr(`Could not save your rating: ${toCliError(err).message}\n`)
+    const failure = toCliError(err)
+    ctx.io.stderr(`Could not save your rating: ${failure.message}\n${failure.hint ? `${failure.hint}\n` : ''}`)
   }
 }

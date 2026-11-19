@@ -104,6 +104,7 @@ describe('a browser sign-in', () => {
     const o = await cli(io, 'optimize', join(io.homedir, 'a.md'))
     expect(o.code).toBe(0)
     expect(o.stderr).toContain('Could not save your rating: A rating needs an API key for now.')
+    expect(o.stderr).toContain('amdahl keys create --name rating')
   })
 })
 
