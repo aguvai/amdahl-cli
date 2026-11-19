@@ -378,7 +378,9 @@ Commands:
   search --research-id <id>
            --research  ask for a research job: a deeper, cited answer (needs
                        a Customer agent key, amdahl keys create --preset
-                       agent; a sign-in gets the search answer)
+                       agent; a sign-in gets the search answer). Search starts
+                       research itself when a question needs it, and offers
+                       it when it could help
            --recipe    one of the console's questions (amdahl recipes); its
                        fill-in is a flag, like --account Acme
            --research-id  read a research job that started earlier; search
