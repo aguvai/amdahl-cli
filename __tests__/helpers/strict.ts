@@ -188,6 +188,8 @@ export function searchProblem(input: unknown, recipeIds: string[] | null = null)
   if (input.query !== undefined && (typeof input.query !== 'string' || input.query.length > 10_000)) return 'Invalid search request: query: String must contain at most 10000 character(s)'
   if (input.limit !== undefined && (!Number.isInteger(input.limit) || (input.limit as number) < 1)) return 'Invalid search request: limit: Number must be greater than 0'
   if (input.route !== undefined && !['auto', 'search', 'research'].includes(String(input.route))) return 'Invalid search request: route: Invalid enum value'
+  // search/query.ts: `from_query_id` is a uuid (the query_id of the answer whose research offer was taken).
+  if (input.from_query_id !== undefined && (typeof input.from_query_id !== 'string' || !UUID.test(input.from_query_id))) return 'Invalid search request: from_query_id: Invalid uuid'
   if (input.answer !== undefined && typeof input.answer !== 'boolean') return 'Invalid search request: answer: Expected boolean'
   if (!(typeof input.query === 'string' && input.query.trim())) return 'Provide a `query`, `filters`, or a `group_by`+`metrics` aggregation: an empty request has nothing to run.'
   return null

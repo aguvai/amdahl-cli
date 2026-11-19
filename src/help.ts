@@ -142,6 +142,10 @@ with the rows it came from.
                 Search prints the id when a job starts. It needs a key that
                 can read research, the one that started the job.
 
+Amdahl starts research by itself when a question needs it, and says why first.
+When it only offers research, at a terminal with a Customer agent key it asks
+once. Otherwise it prints the command: add --research.
+
 With no rows it says why, in the server's words. A search the server cut at its
 deadline says it ran out of time and exits 1; add --research, which can run
 longer. With --json it prints the server's whole answer, every row included.
@@ -234,7 +238,9 @@ ${GLOBAL}`,
 
 List the console's recipe library: the questions it asks as a search, by
 category, with what each reads and the fill-in it needs. "For you" above it
-shows up to four that suit this workspace now, each with why. Run one with
+shows up to four that suit this workspace now, each with why; one hidden in the
+console is left out, and at a terminal it waits a few seconds for a list still
+being made. Run one with
 amdahl search --recipe <id>. With --json it prints every recipe with its
 question and fill-ins, and for_you. Where the server's list cannot be read, it
 lists the copy bundled in this version.
