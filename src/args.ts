@@ -53,6 +53,17 @@ export const COMMAND_OPTIONS: Record<string, OptionSpec> = {
     force: { type: 'boolean' },
     for: { type: 'string' },
   },
+  sequence: {
+    write: { type: 'string' },
+    emails: { type: 'string' },
+    plan: { type: 'string' },
+    csv: { type: 'string' },
+    force: { type: 'boolean' },
+    channel: { type: 'string' },
+    evidence: { type: 'string' },
+    'on-unsupported': { type: 'string' },
+    context: { type: 'string' },
+  },
   grade: {
     channel: { type: 'string' },
     evidence: { type: 'string' },
@@ -199,7 +210,7 @@ export function parseCommandLine(argv: string[]): ParsedArgs {
   const spec = COMMAND_OPTIONS[name]
   if (!spec) throw unknownCommand(positionals.slice(0, words))
 
-  const strict = strictParse(argv, { ...GLOBAL_OPTIONS, ...spec }, name === 'search' && argv.some((a) => a === '--recipe' || a.startsWith('--recipe=')))
+  const strict = strictParse(name === 'sequence' ? bareCsv(argv) : argv, { ...GLOBAL_OPTIONS, ...spec }, name === 'search' && argv.some((a) => a === '--recipe' || a.startsWith('--recipe=')))
   return { command: name, args: strict.positionals.slice(words), flags: strict.values }
 }
 
@@ -247,6 +258,14 @@ function unknownCommand(words: string[]): CliError {
     message,
     `Run \`${amdahlCommand('--help')}\` to see the commands. If the docs show it, this amdahl may be older than the docs: update with \`npm install -g amdahl@latest\`, or run \`npx -y amdahl@latest\`.`
   )
+}
+
+/**
+ * `--csv` alone means "next to the input"; `--csv <path>` names the file, and the path ends in .csv.
+ * Any other word after a bare `--csv` is the input, so it is passed on as `--csv=` and that word.
+ */
+function bareCsv(argv: string[]): string[] {
+  return argv.map((arg, i) => (arg === '--csv' && !/\.csv$/i.test(argv[i + 1] ?? '') ? '--csv=' : arg))
 }
 
 function strictParse(argv: string[], options: OptionSpec, withRecipe = false) {
@@ -306,6 +325,9 @@ What you can do:
                                  Also write drafts-lemlist.csv, a file your
                                  sequencer imports, and say how (Instantly,
                                  Smartlead, lemlist, HeyReach, Apollo and more)
+  amdahl sequence emails.md      Improve a 2 to 10 email sequence, in order
+  amdahl sequence --write "<goal>"
+                                 Write a new one, 2 to 6 emails
   amdahl grade draft.md          Grade a message: score and the lines behind
   amdahl prompt prompt.md        Grade or improve a reusable prompt by the
                                  emails it writes (with no file, at a
@@ -354,6 +376,13 @@ Commands:
                        hubspot, lgm, woodpecker, amplemarket, other (any tool
                        that imports a CSV). lemlist, reply_io and other take
                        both channels, so add --channel email|linkedin.
+  sequence [<file>|-] [--evidence off|workspace] [--on-unsupported flag|remove]
+           [--context <file.json>] [--csv [<file.csv>]] [--force]
+  sequence --write "<goal>" [--emails <2-6>] [--plan <file>] [the flags above]
+           Improve 2 to 10 emails in order (a text, markdown or CSV file, or -
+           for stdin), or write 2 to 6 new ones. Each email is written as a
+           follow-up to the improved ones before it. --json prints {ok, mode,
+           emails, fields}: each email has .subject, .message and .run_id.
   grade <file|-> [--channel email|linkedin] [--evidence off|workspace]
            [--context <file.json>]
            Grade a draft and write nothing. The score always comes with its
