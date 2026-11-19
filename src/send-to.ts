@@ -511,7 +511,8 @@ export function sequenceGuideLines(preset: SendToPreset, subjects: readonly bool
     const parts = [...(s ? [`Subject ${name(k, `${subjectColumn}${suffix}`)}`] : []), `Body ${name(k, `${messageColumn}${suffix}`)}`]
     return `Email ${k + 1}: ${parts.join(', ')}`
   })
-  const later = `Map ${messageColumn}_2 and each later email's columns the same way.`
+  const second = subjects[1] ? `${subjectColumn}_2, ${messageColumn}_2` : `${messageColumn}_2`
+  const later = `Map ${second} and each later email's columns the same way.`
   return [`Import: ${preset.where}`, `${preset.match('email')} ${fixed ? `${preset.label} names two slots, so map each later email's columns to more custom fields.` : later}`, `${preset.insert}, one email per step:`, ...emails]
 }
 

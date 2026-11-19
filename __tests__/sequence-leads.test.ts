@@ -440,6 +440,13 @@ describe('--for', () => {
     )
   })
 
+  it('names email 2\'s subject column in the mapping step when email 2 has its own subject', async () => {
+    const io = await withKey()
+    const r = await cli(io, 'sequence', '--write', 'Book a first meeting.', '--emails', '2', '--leads', file(io, 'leads.csv', LEADS), '--for', 'instantly')
+    expect(r.code).toBe(0)
+    expect(r.stderr.replace(/\n\s+/g, ' ')).toContain("Map amdahl_subject_2, amdahl_message_2 and each later email's columns the same way.")
+  })
+
   it('leaves out a person who is missing an email, and counts them', async () => {
     const io = await withKey({ batchResults: failing(['jo@example.com'], 2) })
     const r = await cli(io, 'sequence', file(io, 'emails.md', EMAILS), '--leads', file(io, 'leads.csv', LEADS), '--for', 'instantly')
