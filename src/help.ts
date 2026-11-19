@@ -364,6 +364,8 @@ Open this workspace in the console.
   feedback: `Usage: amdahl feedback <run-id> --evidence did_it_myself|reported_to_me|inferred
                        [--outcome used|used_with_edits|not_used|unsure]
                        [--sent-text <file> | -] [--comment <text>]
+       amdahl feedback <id> --rating up|down [--surface <what>]
+                       [--comment <text>] [--email-ok | --no-email-ok]
 
 Say what happened to the message an optimize run returned. The run id is the
 one \`amdahl optimize\` printed. Amdahl learns your preferences from an edit,
@@ -377,6 +379,17 @@ unless the evidence is "inferred". Each call stores one event.
 Give at least one of --outcome, --sent-text and --comment. At a terminal, what
 you leave out is asked (two questions at most). With --json, in an agent or in
 CI, nothing is asked: a missing flag is a usage error.
+
+Rate a result with --rating up|down: a thumbs up or down on an optimize run, or
+on a search or research answer (--surface search|research, with its query id or
+research id). It goes to the Amdahl team with your comment, and not the message
+or the question. --email-ok says they may email you about it (--no-email-ok
+says they may not). Until the server accepts a browser sign-in, a rating needs
+an API key. The surfaces are optimize, search, research, grade, lead_list and
+other. It does not mix with --evidence, --outcome or --sent-text: run the
+command once for each. To be asked "Was this useful?" after each optimize or
+search result at a terminal, set feedbackPrompt to true in config.json, or
+AMDAHL_FEEDBACK_PROMPT=1.
 ${GLOBAL}`,
 
   sent: `Usage: amdahl sent <run-id> --provider <provider> --channel <channel>

@@ -334,6 +334,7 @@ amdahl connections           # what is connected, and whether it is healthy
 amdahl connect hubspot       # open the console's add page, to add a CRM or call recorder
 amdahl open                  # open this workspace in the console
 amdahl feedback <run-id> --evidence did_it_myself --outcome used   # what happened to it
+amdahl feedback <run-id> --rating down --comment "too generic"   # a thumbs down on a result
 amdahl sent <run-id> --provider gmail --channel email --sent-as returned --provider-send-id "<msg-id@mail>"   # it went out
 amdahl install claude-code   # connect an AI client and add the Amdahl skill (also codex, cursor)
 amdahl skills add <publisher>/<skill>   # add a skill from amdahl.ai/skills to this project
@@ -393,6 +394,8 @@ amdahl connect [<connector>] [--no-browser]
 amdahl open [--no-browser]
 amdahl feedback <run-id> --evidence did_it_myself|reported_to_me|inferred
                 [--outcome used|used_with_edits|not_used|unsure] [--sent-text <file>|-] [--comment <text>]
+amdahl feedback <id> --rating up|down [--surface optimize|search|research|grade|lead_list|other]
+                [--comment <text>] [--email-ok | --no-email-ok]
 amdahl sent <run-id> --provider <provider> --channel <channel> --sent-as returned|edited
                 [--provider-send-id <id>] [--recipient <email|url> | --recipient-key-hash <sha256>]
                 [--sent-at <time>] [--provider-campaign-id <id>] [--sequence-step <n>]
@@ -807,6 +810,30 @@ Import file for lemlist: drafts-lemlist.csv
   ready), `ready`, `left_out` (`failed`, `not_written`, `needs_input`,
   `no_contact`) and `over_limit`. With no lead ready, no file is written and
   the exit is 1.
+
+## Rate a result
+
+```sh
+amdahl feedback <run-id> --rating down --comment "The opener was generic."
+amdahl feedback <query-id> --rating up --surface search
+```
+
+`--rating up|down` sends a thumbs up or down on something Amdahl returned
+(`POST /feedback`), as the owner of your API key. Until the server
+accepts a browser sign-in, a rating needs an API key, and a sign-in is told so. It goes to the Amdahl
+team with the comment you typed, and never the message or the question. The id
+is the optimize run id `amdahl optimize` printed, or the `query_id` of a search
+(`--surface search`) or a research id (`--surface research`), both UUIDs. The
+surfaces are `optimize`, `search`, `research`, `grade`, `lead_list` and `other`.
+`--email-ok` says the team may email you about it, and `--no-email-ok` that
+they may not. It does not mix with `--evidence`, `--outcome`
+or `--sent-text`, which say what happened to a message: run the command once
+for each.
+
+To be asked "Was this useful?" after each optimize or search result at a
+terminal, set `"feedbackPrompt": true` in `config.json`, or
+`AMDAHL_FEEDBACK_PROMPT=1` (`0` turns it off). It is off by default, asks nothing with `--json`, in CI, in an agent or
+with `AMDAHL_NO_PROMPT=1`, and Enter skips it. A no asks what went wrong.
 
 ## Improve or write a sequence
 

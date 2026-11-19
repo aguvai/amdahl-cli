@@ -26,6 +26,7 @@ import { apiClient, call, resolveCredential, str, type Ctx } from '../context'
 import { EXIT, usageError } from '../errors'
 import { readTextFile } from '../files'
 import { findRun } from '../history'
+import { postRating, RATING_SURFACES, RATINGS, type Rating, type RatingSurface } from '../rating'
 import { SEND_TO_PRESETS } from '../send-to'
 import { atTerminal, canAsk } from '../terminal'
 import { clip, field, records } from '../text'
@@ -150,6 +151,7 @@ export function askingAllowed(ctx: Ctx): boolean {
 /** `amdahl feedback <run-id> --evidence <how> [--sent-text <file>] [--comment <text>] [--outcome <what>]`. */
 export async function feedback(ctx: Ctx, args: string[]): Promise<number> {
   const usage = `Usage: ${amdahlCommand('feedback <run-id> --evidence did_it_myself [--outcome used] [--sent-text <file>] [--comment <text>]')}`
+  if (ctx.flags.rating !== undefined || ctx.flags.surface !== undefined || ctx.flags['email-ok'] !== undefined || ctx.flags['no-email-ok'] !== undefined) return rate(ctx, args)
   const [rawId, ...rest] = args
   if (!rawId || rest.length > 0) throw usageError('Give one run id: the one `amdahl optimize` printed.', usage)
   const id = runId(rawId, usage)
@@ -185,6 +187,41 @@ export async function feedback(ctx: Ctx, args: string[]): Promise<number> {
   )
   const learns = body.sent_text !== undefined && evidence !== 'inferred' ? ' Amdahl learns your preferences from the edit.' : ''
   ctx.out.result({ ...result, ok: true }, `Feedback saved for run ${field(result.run_id) || id}.${learns}`)
+  return EXIT.ok
+}
+
+/** A search query id or a research id is a UUID. */
+function uuidId(value: string, surface: string, usage: string): string {
+  if (!UUID.test(value)) throw usageError(`"${clip(value, 40)}" is not a ${surface === 'search' ? 'query' : 'research'} id.`, `${usage}\nIt looks like 9fd4f2e3-bc8e-436b-86d7-a677a89e8d16.`)
+  return value
+}
+
+/**
+ * `amdahl feedback <id> --rating up|down [--surface <what>] [--comment <text>] [--email-ok]`: a thumbs up or
+ * down on something Amdahl returned, sent to POST /feedback as the CLI. The id is the optimize run id
+ * `amdahl optimize` printed, or a search query id or research id (`--surface search|research`). It does not
+ * mix with the outcome flags: `--outcome`, `--sent-text` and `--evidence` say what happened to a message, a
+ * different record, so run the command once for each.
+ */
+async function rate(ctx: Ctx, args: string[]): Promise<number> {
+  const usage = `Usage: ${amdahlCommand('feedback <id> --rating up|down [--surface optimize|search|research|grade|lead_list|other] [--comment <text>] [--email-ok | --no-email-ok]')}`
+  const [rawId, ...rest] = args
+  if (!rawId || rest.length > 0) throw usageError('Give one id: the run id `amdahl optimize` printed, or a search or research id.', usage)
+  const rating = oneOf('rating', str(ctx.flags.rating), [...RATINGS]) as Rating | undefined
+  if (!rating) throw usageError(`Say what you think with --rating: ${RATINGS.join(', ')}.`, usage)
+  if (ctx.flags.evidence !== undefined || ctx.flags.outcome !== undefined || ctx.flags['sent-text'] !== undefined) {
+    throw usageError('--rating does not go with --evidence, --outcome or --sent-text.', 'A rating says how good the result was. --outcome says what happened to the message. Run the command once for each.')
+  }
+  const known = findRun(ctx, rawId)?.kind
+  const surface = (oneOf('surface', str(ctx.flags.surface), [...RATING_SURFACES]) ?? (known === 'grade' ? 'grade' : 'optimize')) as RatingSurface
+  const id = surface === 'optimize' || surface === 'grade' ? runId(rawId, usage) : surface === 'search' || surface === 'research' ? uuidId(rawId, surface, usage) : rawId
+  if (id.length > 80 || /\s/.test(id)) throw usageError(`"${clip(id, 40)}" is not an id.`, usage)
+  if (ctx.flags['email-ok'] === true && ctx.flags['no-email-ok'] === true) throw usageError('Give --email-ok or --no-email-ok, not both.', usage)
+  const comment = text('comment', str(ctx.flags.comment), MAX_COMMENT_CHARS)
+  const credential = await resolveCredential(ctx)
+  const result = await postRating(ctx, credential, { id, surface, rating, comment, emailOk: ctx.flags['email-ok'] === true ? true : ctx.flags['no-email-ok'] === true ? false : undefined })
+  const mail = result.email_ok === true ? ' Amdahl may email you about it.' : ''
+  ctx.out.result({ ...result, ok: true }, `Rating saved for ${id}.${mail}`)
   return EXIT.ok
 }
 

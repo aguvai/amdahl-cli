@@ -28,6 +28,7 @@
 // and `--research-id <id>` reads a job started earlier (the same wait).
 
 import { amdahlCommand } from '../command-name'
+import { askRating } from '../rating'
 import { apiClient, call, resolveCredential, str, type Credential, type Ctx } from '../context'
 import { CliError, EXIT, usageError } from '../errors'
 import { blockLines } from '../blocks'
@@ -413,7 +414,10 @@ async function showAnswer(ctx: Ctx, credential: Credential, body: Record<string,
     if (refused) out.info(wrap(refused).join('\n'))
   }
   out.result({}, searchLines(result, question, researchAsked).join('\n'))
-  if (researchAsked || !(await offerResearch(ctx, credential, result, question, researchKeyLine()))) return EXIT.ok
+  if (researchAsked || !(await offerResearch(ctx, credential, result, question, researchKeyLine()))) {
+    await askRating(ctx, credential, { id: field(result.query_id), surface: 'search' })
+    return EXIT.ok
+  }
   // A `query_id` links the research to the answer it follows; without one from this question, none is sent.
   const queryId = field(result.query_id)
   const research = { ...body, route: 'research', ...(queryId ? { from_query_id: queryId } : {}) }
