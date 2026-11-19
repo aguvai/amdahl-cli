@@ -89,6 +89,7 @@ export const COMMAND_OPTIONS: Record<string, OptionSpec> = {
     rating: { type: 'string' },
     surface: { type: 'string' },
     'email-ok': { type: 'boolean' },
+    'no-email-ok': { type: 'boolean' },
   },
   sent: {
     provider: { type: 'string' },

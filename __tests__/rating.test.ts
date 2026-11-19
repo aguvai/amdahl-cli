@@ -10,6 +10,7 @@ import { VERSION } from '../src/version'
 import { cli, fakeIo, type FakeIo } from './helpers/fake-io'
 import { API_KEY, KNOWN_RUN, SEARCH_QUERY, startMockServer, type MockServer } from './helpers/mock-server'
 
+const RESEARCH_ID = '44444444-4444-4444-8444-444444444444'
 let server: MockServer | null = null
 afterEach(async () => {
   await server?.close()
@@ -48,10 +49,10 @@ describe('amdahl feedback --rating', () => {
   it('rates a search answer by its query id, and a research answer by its research id', async () => {
     const io = await withKey()
     expect((await cli(io, 'feedback', SEARCH_QUERY, '--rating', 'up', '--surface', 'search')).code).toBe(0)
-    expect((await cli(io, 'feedback', 'res-1', '--rating', 'up', '--surface', 'research', '--json')).json).toMatchObject({ ok: true, surface: 'research', rating: 'up' })
+    expect((await cli(io, 'feedback', RESEARCH_ID, '--rating', 'up', '--surface', 'research', '--json')).json).toMatchObject({ ok: true, surface: 'research', rating: 'up' })
     expect(ratings().map((b) => [b.surface, b.subject_id])).toEqual([
       ['search', SEARCH_QUERY],
-      ['research', 'res-1'],
+      ['research', RESEARCH_ID],
     ])
     expect(ratings()[0]).not.toHaveProperty('comment')
     expect(ratings()[0]).not.toHaveProperty('email_ok')
@@ -69,6 +70,8 @@ describe('amdahl feedback --rating', () => {
       [KNOWN_RUN, '--surface', 'search'],
       [KNOWN_RUN, '--email-ok'],
       ['has space', '--rating', 'up', '--surface', 'other'],
+      ['res-1', '--rating', 'up', '--surface', 'research'],
+      [KNOWN_RUN, '--rating', 'up', '--email-ok', '--no-email-ok'],
     ]) {
       const r = await cli(io, 'feedback', ...args)
       expect(r.code, args.join(' ')).toBe(2)
@@ -81,6 +84,31 @@ describe('amdahl feedback --rating', () => {
     expect((await cli(io, 'feedback', KNOWN_RUN, '--outcome', 'used')).code).toBe(2)
     expect((await cli(io, 'feedback', KNOWN_RUN, '--evidence', 'did_it_myself', '--outcome', 'used')).code).toBe(0)
     expect(outcomes()).toHaveLength(1)
+    expect(ratings()).toEqual([])
+  })
+})
+
+describe('a browser sign-in', () => {
+  it('cannot rate yet: the command says so and sends nothing, and the optimize prompt never asks', async () => {
+    server = await startMockServer({})
+    const io = fakeIo({ AMDAHL_API_URL: server.url, AMDAHL_FEEDBACK_PROMPT: '1' })
+    expect((await cli(io, 'login', '--json')).code).toBe(0)
+    io.stdoutIsTTY = true
+    const r = await cli(io, 'feedback', KNOWN_RUN, '--rating', 'up')
+    expect(r.code).toBe(4)
+    expect(r.stderr).toContain('A rating needs an API key for now.')
+    expect(r.stderr).toContain('amdahl keys create')
+    writeFileSync(join(io.homedir, 'a.md'), 'draft')
+    io.answers.push('y')
+    expect((await cli(io, 'optimize', join(io.homedir, 'a.md'))).code).toBe(0)
+    expect(io.prompts.filter((p) => p.startsWith('Was this useful?'))).toEqual([])
+    expect(ratings()).toEqual([])
+  })
+
+  it('an access token in AMDAHL_ACCESS_TOKEN is refused the same way', async () => {
+    server = await startMockServer({})
+    const io = fakeIo({ AMDAHL_API_URL: server.url, AMDAHL_ACCESS_TOKEN: 'sometoken' })
+    expect((await cli(io, 'feedback', KNOWN_RUN, '--rating', 'up')).code).toBe(4)
     expect(ratings()).toEqual([])
   })
 })
@@ -125,6 +153,14 @@ describe('the "Was this useful?" line', () => {
     io.answers.push('y')
     expect((await cli(io, 'search', 'pricing')).code).toBe(0)
     expect(ratings()).toEqual([expect.objectContaining({ surface: 'search', subject_id: SEARCH_QUERY, rating: 'up' })])
+  })
+
+  it('Ctrl+C at the question after a finished optimize does not change the exit code', async () => {
+    const io = await terminal({ AMDAHL_FEEDBACK_PROMPT: '1' })
+    io.answers.push(null)
+    const r = await cli(io, 'optimize', join(io.homedir, 'a.md'))
+    expect(r.code).toBe(0)
+    expect(ratings()).toEqual([])
   })
 
   it('reads the config setting, and an env of 0 beats it', async () => {

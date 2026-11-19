@@ -503,6 +503,7 @@ export async function startMockServer(options: MockOptions = {}): Promise<MockSe
       }
 
       if (path === '/api/platform/v1/feedback' && req.method === 'POST') {
+        if (kind !== 'api_key') return json(res, 403, { error: 'Feedback is sent from the console or with an API key.', code: 'credential_not_allowed' })
         const input = JSON.parse(body) as Record<string, unknown>
         const problem = ratingProblem(input)
         if (problem) return json(res, 400, { error: problem, code: 'invalid_argument' })

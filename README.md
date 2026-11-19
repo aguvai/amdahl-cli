@@ -391,7 +391,7 @@ amdahl open [--no-browser]
 amdahl feedback <run-id> --evidence did_it_myself|reported_to_me|inferred
                 [--outcome used|used_with_edits|not_used|unsure] [--sent-text <file>|-] [--comment <text>]
 amdahl feedback <id> --rating up|down [--surface optimize|search|research|grade|lead_list|other]
-                [--comment <text>] [--email-ok]
+                [--comment <text>] [--email-ok | --no-email-ok]
 amdahl sent <run-id> --provider <provider> --channel <channel> --sent-as returned|edited
                 [--provider-send-id <id>] [--recipient <email|url> | --recipient-key-hash <sha256>]
                 [--sent-at <time>] [--provider-campaign-id <id>] [--sequence-step <n>]
@@ -815,17 +815,20 @@ amdahl feedback <query-id> --rating up --surface search
 ```
 
 `--rating up|down` sends a thumbs up or down on something Amdahl returned
-(`POST /feedback`), as the owner of your key or sign-in. It goes to the Amdahl
+(`POST /feedback`), as the owner of your API key. It needs a key for now: a
+browser sign-in cannot send a rating yet, and says so before anything is sent. It goes to the Amdahl
 team with the comment you typed, and never the message or the question. The id
 is the optimize run id `amdahl optimize` printed, or the `query_id` of a search
-(`--surface search`) or a research id (`--surface research`). `--email-ok` says
-the team may email you about it. It does not mix with `--evidence`, `--outcome`
+(`--surface search`) or a research id (`--surface research`), both UUIDs. The
+surfaces are `optimize`, `search`, `research`, `grade`, `lead_list` and `other`.
+`--email-ok` says the team may email you about it, and `--no-email-ok` that
+they may not. It does not mix with `--evidence`, `--outcome`
 or `--sent-text`, which say what happened to a message: run the command once
 for each.
 
 To be asked "Was this useful?" after each optimize or search result at a
-terminal, set `"feedbackPrompt": true` in `config.json`, or `AMDAHL_FEEDBACK_PROMPT=1`
-(`0` turns it off). It is off by default, asks nothing with `--json`, in CI, in an agent or
+terminal with an API key, set `"feedbackPrompt": true` in `config.json`, or
+`AMDAHL_FEEDBACK_PROMPT=1` (`0` turns it off). It is off by default, asks nothing with `--json`, in CI, in an agent or
 with `AMDAHL_NO_PROMPT=1`, and Enter skips it. A no asks what went wrong.
 
 ## After you send
